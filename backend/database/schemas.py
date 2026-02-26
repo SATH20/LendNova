@@ -25,3 +25,4 @@ class OcrResultSchema(Schema):
 class FraudCheckInputSchema(Schema):
     ocr_data = fields.Nested(OcrResultSchema, required=True)
     form_data = fields.Nested(AssessmentInputSchema, required=True)
+    assessment_id = fields.Int(required=False, allow_none=True)
