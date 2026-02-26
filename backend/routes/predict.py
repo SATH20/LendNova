@@ -1,0 +1,83 @@
+import os
+import joblib
+import pandas as pd
+from flask import Blueprint, request, jsonify, current_app
+from marshmallow import ValidationError
+from database.schemas import AssessmentInputSchema, AssessmentOutputSchema
+from database.models import Assessment, db
+from services.explainability import explain_decision
+from utils.helpers import (
+    credit_score_from_prob,
+    risk_band_from_score,
+    confidence_from_prob,
+    mask_amount,
+)
+
+predict_bp = Blueprint('predict', __name__)
+schema = AssessmentInputSchema()
+output_schema = AssessmentOutputSchema()
+
+@predict_bp.route('/predict', methods=['POST'])
+def predict():
+    try:
+        data = schema.load(request.json)
+
+        model_path = current_app.config["MODEL_PATH"]
+        pipeline_path = current_app.config["PIPELINE_PATH"]
+        stats_path = current_app.config["FEATURE_STATS_PATH"]
+
+        if not os.path.exists(model_path) or not os.path.exists(pipeline_path):
+            return jsonify({"error": "Model not trained yet."}), 503
+
+        model = joblib.load(model_path)
+        preprocessor = joblib.load(pipeline_path)
+        stats = joblib.load(stats_path) if os.path.exists(stats_path) else {}
+
+        df = pd.DataFrame([data])
+        transformed = preprocessor.transform(df)
+        if hasattr(transformed, "toarray"):
+            transformed = transformed.toarray()
+
+        prob = float(model.predict_proba(transformed)[0][1])
+        credit_score = credit_score_from_prob(prob)
+        risk_band = risk_band_from_score(credit_score)
+        confidence_score = confidence_from_prob(prob)
+
+        feature_names = stats.get("feature_names")
+        feature_means = stats.get("feature_means")
+        if not feature_names:
+            feature_names = preprocessor.named_steps["preprocess"].get_feature_names_out().tolist()
+
+        top_factors = explain_decision(
+            model,
+            feature_names,
+            transformed[0],
+            feature_means,
+            top_n=5,
+        )
+
+        assessment = Assessment(
+            income=mask_amount(data["income"]),
+            expenses=mask_amount(data["expenses"]),
+            employment_type=data["employment_type"],
+            job_tenure=data["job_tenure"],
+            credit_score=credit_score,
+            approval_probability=prob,
+            fraud_probability=0.0,
+            risk_band=risk_band,
+            model_used=stats.get("model") or type(model).__name__,
+            confidence_score=confidence_score,
+        )
+
+        db.session.add(assessment)
+        db.session.commit()
+
+        result = output_schema.dump(assessment)
+        result["top_factors"] = top_factors
+
+        return jsonify(result), 200
+
+    except ValidationError as err:
+        return jsonify(err.messages), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
