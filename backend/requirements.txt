@@ -1,0 +1,15 @@
+flask
+flask-cors
+sqlalchemy
+flask-sqlalchemy
+marshmallow
+flask-marshmallow
+psycopg2-binary
+scikit-learn
+pandas
+numpy
+joblib
+pytesseract
+python-dotenv
+Pillow
+marshmallow-sqlalchemy
