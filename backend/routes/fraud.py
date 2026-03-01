@@ -22,6 +22,8 @@ def fraud_check():
             assessment = Assessment.query.get(assessment_id)
             if assessment:
                 assessment.fraud_probability = result["fraud_probability"]
+                assessment.assessment_status = "VERIFIED"
+                assessment.verification_status = "COMPLETED"
                 db.session.commit()
 
         return jsonify(result), 200

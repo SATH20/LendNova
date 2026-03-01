@@ -16,10 +16,12 @@ class Assessment(db.Model):
     # Prediction Results
     credit_score = db.Column(db.Integer, nullable=False)
     approval_probability = db.Column(db.Float, nullable=False)
-    fraud_probability = db.Column(db.Float, nullable=False)
+    fraud_probability = db.Column(db.Float, nullable=True)
     risk_band = db.Column(db.String(20), nullable=False)
     model_used = db.Column(db.String(50), nullable=False)
     confidence_score = db.Column(db.Float, nullable=False)
+    assessment_status = db.Column(db.String(20), nullable=False, default="PRELIMINARY")
+    verification_status = db.Column(db.String(20), nullable=False, default="PENDING")
     
     # Relationship
     documents = db.relationship('Document', backref='assessment', lazy=True)
@@ -30,8 +32,11 @@ class Assessment(db.Model):
             'timestamp': self.timestamp.isoformat(),
             'credit_score': self.credit_score,
             'approval_probability': self.approval_probability,
+            'fraud_probability': self.fraud_probability,
             'risk_band': self.risk_band,
-            'model_used': self.model_used
+            'model_used': self.model_used,
+            'assessment_status': self.assessment_status,
+            'verification_status': self.verification_status
         }
 
 class Document(db.Model):

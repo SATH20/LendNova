@@ -34,6 +34,7 @@ def create_app(config_class=Config):
 
     with app.app_context():
         db.create_all()
+        _ensure_assessments_schema()
 
         model_path = app.config["MODEL_PATH"]
         pipeline_path = app.config["PIPELINE_PATH"]
@@ -44,6 +45,93 @@ def create_app(config_class=Config):
             train_models()
 
     return app
+
+def _ensure_assessments_schema():
+    if db.engine.dialect.name != "sqlite":
+        return
+    with db.engine.begin() as connection:
+        table_info = connection.exec_driver_sql("PRAGMA table_info(assessments)").fetchall()
+        if not table_info:
+            return
+        existing_cols = {row[1] for row in table_info}
+        required_cols = {
+            "id",
+            "timestamp",
+            "income",
+            "expenses",
+            "employment_type",
+            "job_tenure",
+            "credit_score",
+            "approval_probability",
+            "fraud_probability",
+            "risk_band",
+            "model_used",
+            "confidence_score",
+            "assessment_status",
+            "verification_status",
+        }
+        if required_cols.issubset(existing_cols):
+            return
+        connection.exec_driver_sql("PRAGMA foreign_keys=off")
+        connection.exec_driver_sql("ALTER TABLE assessments RENAME TO assessments_old")
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE assessments (
+                id INTEGER PRIMARY KEY,
+                timestamp DATETIME,
+                income FLOAT NOT NULL,
+                expenses FLOAT NOT NULL,
+                employment_type VARCHAR(50) NOT NULL,
+                job_tenure FLOAT NOT NULL,
+                credit_score INTEGER NOT NULL,
+                approval_probability FLOAT NOT NULL,
+                fraud_probability FLOAT,
+                risk_band VARCHAR(20) NOT NULL,
+                model_used VARCHAR(50) NOT NULL,
+                confidence_score FLOAT NOT NULL,
+                assessment_status VARCHAR(20) NOT NULL,
+                verification_status VARCHAR(20) NOT NULL
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            INSERT INTO assessments (
+                id,
+                timestamp,
+                income,
+                expenses,
+                employment_type,
+                job_tenure,
+                credit_score,
+                approval_probability,
+                fraud_probability,
+                risk_band,
+                model_used,
+                confidence_score,
+                assessment_status,
+                verification_status
+            )
+            SELECT
+                id,
+                timestamp,
+                income,
+                expenses,
+                employment_type,
+                job_tenure,
+                credit_score,
+                approval_probability,
+                fraud_probability,
+                risk_band,
+                model_used,
+                confidence_score,
+                'PRELIMINARY',
+                'PENDING'
+            FROM assessments_old
+            """
+        )
+        connection.exec_driver_sql("DROP TABLE assessments_old")
+        connection.exec_driver_sql("PRAGMA foreign_keys=on")
 
 if __name__ == '__main__':
     app = create_app()

@@ -1,15 +1,44 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { AnimatePresence, animate, motion } from "framer-motion";
 import Sidebar from "@/components/Sidebar";
 import PipelineLoader from "@/components/PipelineLoader";
-import QuickChips from "@/components/QuickChips";
-import RiskResultCard from "@/components/RiskResultCard";
 import FraudResultCard from "@/components/FraudResultCard";
 import ExplainabilityCard from "@/components/ExplainabilityCard";
-import ModelComparisonCard from "@/components/ModelComparisonCard";
-import type { FraudResult, ModelMetric, RiskResult } from "@/lib/mockEngine";
+import {
+  fetchAssessments,
+  runAssessment,
+  uploadDocument,
+  type AssessmentHistoryItem,
+  type AssessmentInput,
+  type OcrResponse,
+  type PredictResponse,
+} from "@/lib/api";
+
+type RiskResult = {
+  score: number;
+  approvalProbability: number;
+  riskBand: "Low" | "Medium" | "High";
+  model: string;
+  confidence: number;
+  factors: { name: string; impact: number }[];
+  fraudProbability: number;
+  assessmentStatus: "PRELIMINARY" | "VERIFIED";
+  verificationStatus: "PENDING" | "COMPLETED";
+  fraudFlags: string[];
+};
+
+type FraudResult = {
+  probability: number;
+  flags: string[];
+  fields: {
+    name: string;
+    idNumber: string;
+    employer: string;
+    income: string;
+  };
+};
 
 type HistoryItem = {
   timestamp: string;
@@ -25,29 +54,13 @@ type FeedItem = {
   time: string;
 };
 
-const actions = [
-  "Run Risk Score",
-  "OCR Extract",
-  "Fraud Check",
-  "Explain Decision",
-  "Compare Models",
-  "Generate Report",
+const employmentOptions: AssessmentInput["employment_type"][] = [
+  "Full-time",
+  "Part-time",
+  "Self-employed",
+  "Unemployed",
+  "Student",
 ];
-
-const chips = [
-  { label: "Income", value: "Income: $4,500/mo" },
-  { label: "Expenses", value: "Expenses: $1,900/mo" },
-  { label: "Employment", value: "Employment: Full-time" },
-  { label: "Tenure", value: "Tenure: 2.5 years" },
-  { label: "Upload Payslip", value: "Upload Payslip: yes" },
-  { label: "Upload ID", value: "Upload ID: yes" },
-  { label: "Run Risk", value: "Run risk score with latest cash-flow data." },
-  { label: "Fraud Check", value: "Run OCR fraud check on uploaded documents." },
-  { label: "Explain", value: "Explain the decision for the latest assessment." },
-];
-
-const defaultInput =
-  "Income: $4,200/mo, Expenses: $1,700/mo, Employment: Full-time, Tenure: 3 years.";
 
 function AnimatedValue({
   value,
@@ -79,32 +92,56 @@ function AnimatedValue({
 }
 
 export default function AssistantPage() {
-  const [input, setInput] = useState(defaultInput);
-  const [action, setAction] = useState(actions[0]);
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<"input" | "processing" | "results">("input");
+  const [activeTab, setActiveTab] = useState<"overview" | "explainability" | "fraud" | "history">(
+    "overview"
+  );
   const [activeStep, setActiveStep] = useState(0);
   const [riskResult, setRiskResult] = useState<RiskResult | null>(null);
   const [fraudResult, setFraudResult] = useState<FraudResult | null>(null);
-  const [modelMetrics, setModelMetrics] = useState<ModelMetric[] | null>(null);
   const [feed, setFeed] = useState<FeedItem[]>([]);
-  const [history, setHistory] = useState<HistoryItem[]>(() => {
-    if (typeof window === "undefined") {
-      return [];
-    }
-    const stored = window.localStorage.getItem("lendnova_history");
-    return stored ? JSON.parse(stored) : [];
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [ocrResult, setOcrResult] = useState<OcrResponse | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [assessmentId, setAssessmentId] = useState<number | null>(null);
+  const [assessmentStatus, setAssessmentStatus] = useState<"PRELIMINARY" | "VERIFIED">(
+    "PRELIMINARY"
+  );
+  const [verificationStatus, setVerificationStatus] = useState<"PENDING" | "COMPLETED">(
+    "PENDING"
+  );
+  const [formData, setFormData] = useState({
+    income: "4200",
+    expenses: "1700",
+    employmentType: "Full-time" as AssessmentInput["employment_type"],
+    jobTenure: "3",
   });
 
   useEffect(() => {
-    window.localStorage.setItem("lendnova_history", JSON.stringify(history));
-  }, [history]);
+    const loadHistory = async () => {
+      try {
+        const response = await fetchAssessments();
+        const items = response.assessments.map((item: AssessmentHistoryItem) => ({
+          timestamp: new Date(item.timestamp).toLocaleString(),
+          score: item.credit_score,
+          approvalProbability: item.approval_probability,
+          fraudProbability: item.fraud_probability ?? 0,
+          riskBand: item.risk_band,
+        }));
+        setHistory(items);
+      } catch {
+        setHistory([]);
+      }
+    };
+    loadHistory();
+  }, []);
 
   const statusChips = useMemo(
-    () => ["Secure", "Model: Gradient Boosting", "v1.0", "Live"],
-    []
+    () => ["Secure", `Model: ${riskResult?.model ?? "Gradient Boosting"}`, "v1.0", "Live"],
+    [riskResult?.model]
   );
-  const showSkeleton =
-    loading && !riskResult && !fraudResult && !modelMetrics;
   const [simIncome, setSimIncome] = useState(4200);
   const [simExpenses, setSimExpenses] = useState(1700);
   const [simTenure, setSimTenure] = useState(36);
@@ -123,6 +160,40 @@ export default function AssistantPage() {
     return Math.max(0.45, Math.min(0.95, 0.45 + normalized * 0.5));
   }, [simScore]);
 
+  const parseNumber = (value: string) => {
+    const cleaned = value.replace(/,/g, "");
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+
+  const buildAssessmentInput = (): AssessmentInput => ({
+    income: parseNumber(formData.income) ?? 0,
+    expenses: parseNumber(formData.expenses) ?? 0,
+    employment_type: formData.employmentType,
+    job_tenure: parseNumber(formData.jobTenure) ?? 0,
+  });
+
+  const mapPredictResponse = (response: PredictResponse): RiskResult => ({
+    score: response.credit_score,
+    approvalProbability: response.approval_probability,
+    riskBand: response.risk_band,
+    model: response.model_used,
+    confidence: response.confidence_score,
+    factors: (response.top_factors ?? []).map((factor) => ({
+      name: formatFactorName(factor.factor),
+      impact: factor.impact,
+    })),
+    fraudProbability: response.fraud_probability ?? 0,
+    assessmentStatus: response.assessment_status,
+    verificationStatus: response.verification_status,
+    fraudFlags: response.fraud_flags ?? [],
+  });
+
+  const formatFactorName = (name: string) => {
+    const cleaned = name.replace(/^(num__|cat__)/, "").replace(/_/g, " ");
+    return cleaned.replace(/\b\w/g, (char) => char.toUpperCase());
+  };
+
   const addFeed = (message: string) => {
     setFeed((prev) => [
       {
@@ -134,125 +205,155 @@ export default function AssistantPage() {
     ]);
   };
 
-  const handleRun = async (overrideAction?: string) => {
+  const runOcrVerification = async (assessmentInput: AssessmentInput) => {
+    if (!selectedFile) {
+      throw new Error("Upload a document before running OCR.");
+    }
+    setActiveStep(2);
+    addFeed("OCR extraction running on uploaded documents.");
+    const ocr = await uploadDocument(
+      selectedFile,
+      "payslip",
+      assessmentId ?? undefined,
+      assessmentInput
+    );
+    setOcrResult(ocr);
+    addFeed("OCR extraction completed.");
+    if (ocr.assessment) {
+      const verifiedRisk = mapPredictResponse(ocr.assessment);
+      setRiskResult(verifiedRisk);
+      setAssessmentStatus(verifiedRisk.assessmentStatus);
+      setVerificationStatus(verifiedRisk.verificationStatus);
+    }
+    if (ocr.fraud_probability !== undefined) {
+      setFraudResult({
+        probability: ocr.fraud_probability ?? 0,
+        flags: ocr.fraud_flags?.length ? ocr.fraud_flags : ["No anomalies detected"],
+        fields: {
+          name: ocr.name ?? "Unavailable",
+          idNumber: ocr.document_id ? `DOC-${ocr.document_id}` : "N/A",
+          employer: ocr.employer ?? "Unavailable",
+          income: ocr.income ? `$${Math.round(ocr.income).toLocaleString()}` : "Unavailable",
+        },
+      });
+    }
+    return ocr;
+  };
+
+  const handleAssessment = async () => {
+    const assessmentInput = buildAssessmentInput();
+    if (!assessmentInput.income || !assessmentInput.expenses || !assessmentInput.job_tenure) {
+      setErrorMessage("Enter income, expenses, and job tenure to continue.");
+      return;
+    }
     setLoading(true);
+    setMode("processing");
+    setActiveTab("overview");
+    setErrorMessage(null);
     setActiveStep(0);
     addFeed("Assessment workflow initialized with secure session token.");
     const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-    let latestRisk: RiskResult | null = null;
-    let latestFraud: FraudResult | null = null;
-    const activeAction = overrideAction ?? action;
 
     const runPredict = async () => {
       setActiveStep(1);
-      await wait(180);
-      setActiveStep(2);
-      addFeed("Risk model inference started using Gradient Boosting v1.0.");
-      const response = await fetch("/api/predict", { method: "POST" });
-      const data = await response.json();
-      setRiskResult(data.risk);
-      setModelMetrics(data.modelMetrics);
-      latestRisk = data.risk as RiskResult;
-      addFeed(`Risk score generated at ${data.risk.score} with ${(data.risk.confidence * 100).toFixed(1)}% confidence.`);
-      return latestRisk;
-    };
-
-    const runFraud = async () => {
-      setActiveStep(3);
-      addFeed("OCR fraud screening triggered with document integrity checks.");
-      const response = await fetch("/api/fraud-check", { method: "POST" });
-      const data = await response.json();
-      setFraudResult(data.fraud);
-      latestFraud = data.fraud as FraudResult;
-      addFeed(`Fraud likelihood assessed at ${(data.fraud.probability * 100).toFixed(2)}%.`);
-      return latestFraud;
-    };
-
-    if (activeAction === "Run Risk Score") {
-      await wait(300);
-      await runPredict();
-    }
-
-    if (activeAction === "OCR Extract") {
-      setActiveStep(1);
-      addFeed("OCR extraction running on uploaded identity artifacts.");
-      await wait(300);
-      const response = await fetch("/api/ocr-extract", { method: "POST" });
-      const data = await response.json();
-      setFraudResult((prev) =>
-        prev
-          ? { ...prev, fields: { ...prev.fields, ...data.ocr } }
-          : {
-              probability: 0.05,
-              flags: ["Document Scan Verified"],
-              fields: {
-                name: data.ocr.name,
-                idNumber: data.ocr.idNumber,
-                employer: data.ocr.employer,
-                income: data.ocr.income,
-              },
-            }
+      await wait(120);
+      addFeed("Risk model inference started using production ML pipeline.");
+      const response = await runAssessment(assessmentInput);
+      setAssessmentId(response.id ?? null);
+      const risk = mapPredictResponse(response);
+      setRiskResult(risk);
+      setAssessmentStatus(risk.assessmentStatus);
+      setVerificationStatus(risk.verificationStatus);
+      addFeed(
+        `Risk score generated at ${risk.score} with ${(risk.confidence * 100).toFixed(1)}% confidence.`
       );
-    }
+      return risk;
+    };
 
-    if (activeAction === "Fraud Check") {
-      await wait(300);
-      await runFraud();
-    }
 
-    if (activeAction === "Explain Decision") {
-      const risk = riskResult ?? (await runPredict());
-      latestRisk = risk;
-      addFeed("Explainability factors compiled for audit-ready decision trail.");
-    }
-
-    if (activeAction === "Compare Models") {
-      if (!modelMetrics) {
-        await runPredict();
-      }
-      addFeed("Model benchmarking snapshot updated for governance review.");
-    }
-
-    if (activeAction === "Generate Report") {
-      await wait(300);
+    try {
       const risk = await runPredict();
-      const fraud = await runFraud();
+      setFraudResult(null);
       setHistory((prev) => [
         {
           timestamp: new Date().toLocaleString(),
           score: risk.score,
           approvalProbability: risk.approvalProbability,
-          fraudProbability: fraud.probability,
+          fraudProbability: fraudResult?.probability ?? 0,
           riskBand: risk.riskBand,
         },
         ...prev.slice(0, 4),
       ]);
-    }
 
-    if (activeAction === "Run Risk Score") {
-      const risk = latestRisk ?? riskResult;
-      if (risk) {
-        setHistory((prev) => [
-          {
-            timestamp: new Date().toLocaleString(),
-            score: risk.score,
-            approvalProbability: risk.approvalProbability,
-            fraudProbability: (latestFraud ?? fraudResult)?.probability ?? 0.04,
-            riskBand: risk.riskBand,
-          },
-          ...prev.slice(0, 4),
-        ]);
+      setActiveStep(4);
+      addFeed("Decision package sealed with audit hash and policy rationale.");
+      setMode("results");
+      await wait(180);
+      try {
+        const refreshed = await fetchAssessments();
+        const items = refreshed.assessments.map((item) => ({
+          timestamp: new Date(item.timestamp).toLocaleString(),
+          score: item.credit_score,
+          approvalProbability: item.approval_probability,
+          fraudProbability: item.fraud_probability ?? 0,
+          riskBand: item.risk_band,
+        }));
+        setHistory(items);
+      } catch {
+        setHistory((prev) => prev);
       }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Request failed.");
+      setMode("input");
+    } finally {
+      setLoading(false);
     }
-
-    setActiveStep(4);
-    addFeed("Decision package sealed with audit hash and policy rationale.");
-    await wait(200);
-    setLoading(false);
   };
 
-  const handleAssessment = async () => {
-    await handleRun("Generate Report");
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setSelectedFile(null);
+      setOcrResult(null);
+      setFraudResult(null);
+      setAssessmentStatus("PRELIMINARY");
+      setVerificationStatus("PENDING");
+      return;
+    }
+    const allowed = ["image/png", "image/jpeg", "application/pdf"];
+    if (!allowed.includes(file.type)) {
+      setErrorMessage("Unsupported file type. Upload PNG, JPG, or PDF.");
+      setSelectedFile(null);
+      return;
+    }
+    setErrorMessage(null);
+    setSelectedFile(file);
+    setOcrResult(null);
+    setFraudResult(null);
+  };
+
+  const handleVerify = async () => {
+    if (!selectedFile) {
+      setErrorMessage("Upload a document to verify.");
+      return;
+    }
+    const assessmentInput = buildAssessmentInput();
+    setLoading(true);
+    setMode("processing");
+    setErrorMessage(null);
+    setActiveStep(2);
+    addFeed("Verification workflow started with uploaded documents.");
+    try {
+      await runOcrVerification(assessmentInput);
+      setActiveStep(4);
+      addFeed("Verification completed and assessment updated.");
+      setMode("results");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Verification failed.");
+      setMode("results");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -298,238 +399,467 @@ export default function AssistantPage() {
             </div>
           </motion.div>
 
-          <motion.div
-            whileHover={{ y: -4, rotateX: 2, rotateY: 2 }}
-            transition={{ type: "spring", stiffness: 120, damping: 16 }}
-            className="glass glow-border rounded-3xl p-6"
-          >
-            <p className="text-xs uppercase tracking-[0.3em] text-muted">
-              AI Command Console
-            </p>
-            <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_220px_180px]">
-              <input
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                placeholder="Type borrower details (income, expenses, job tenure) or choose an action…"
-                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-[#4F7FFF]/70 focus:ring-2 focus:ring-[#4F7FFF]/30"
-              />
-              <select
-                value={action}
-                onChange={(event) => setAction(event.target.value)}
-                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#4F7FFF]/70 focus:ring-2 focus:ring-[#4F7FFF]/30"
-              >
-                {actions.map((item) => (
-                  <option key={item} value={item} className="bg-[#0A0F1F]">
-                    {item}
-                  </option>
-                ))}
-              </select>
+          {mode === "input" && (
+            <motion.div
+              whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
+              transition={{ type: "spring", stiffness: 120, damping: 16 }}
+              className="glass glow-border mx-auto w-full max-w-2xl rounded-3xl p-8"
+            >
+              <p className="text-xs uppercase tracking-[0.3em] text-muted">New Assessment</p>
+              <h2 className="mt-3 text-2xl font-semibold text-white">Run Credit Evaluation</h2>
+              <div className="mt-6 grid gap-5">
+                <div>
+                  <label className="text-xs uppercase tracking-[0.25em] text-muted">
+                    Monthly Income
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={formData.income}
+                    onChange={(event) =>
+                      setFormData((prev) => ({ ...prev, income: event.target.value }))
+                    }
+                    className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-[#4F7FFF]/70 focus:ring-2 focus:ring-[#4F7FFF]/30"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs uppercase tracking-[0.25em] text-muted">
+                    Monthly Expenses
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={formData.expenses}
+                    onChange={(event) =>
+                      setFormData((prev) => ({ ...prev, expenses: event.target.value }))
+                    }
+                    className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-[#4F7FFF]/70 focus:ring-2 focus:ring-[#4F7FFF]/30"
+                  />
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.25em] text-muted">
+                      Employment Type
+                    </label>
+                    <select
+                      value={formData.employmentType}
+                      onChange={(event) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          employmentType: event.target.value as AssessmentInput["employment_type"],
+                        }))
+                      }
+                      className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none focus:border-[#4F7FFF]/70 focus:ring-2 focus:ring-[#4F7FFF]/30"
+                    >
+                      {employmentOptions.map((option) => (
+                        <option key={option} value={option} className="bg-[#0A0F1F]">
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.25em] text-muted">
+                      Job Tenure (Years)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.5}
+                      value={formData.jobTenure}
+                      onChange={(event) =>
+                        setFormData((prev) => ({ ...prev, jobTenure: event.target.value }))
+                      }
+                      className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-[#4F7FFF]/70 focus:ring-2 focus:ring-[#4F7FFF]/30"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs uppercase tracking-[0.25em] text-muted">
+                    Optional Document Upload
+                  </label>
+                  <label className="mt-3 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-muted">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,application/pdf"
+                      onChange={handleFileChange}
+                      className="text-xs text-white file:mr-3 file:rounded-full file:border-0 file:bg-white/10 file:px-3 file:py-1 file:text-xs file:text-white"
+                    />
+                    {selectedFile ? selectedFile.name : "Attach payslip or ID"}
+                  </label>
+                </div>
+              </div>
+              {errorMessage && (
+                <div className="mt-5 rounded-2xl border border-[#FF5C5C]/30 bg-[#FF5C5C]/10 px-4 py-3 text-xs text-[#FF5C5C]">
+                  {errorMessage}
+                </div>
+              )}
               <button
                 onClick={handleAssessment}
-                className="ripple rounded-2xl bg-gradient-to-r from-[#4F7FFF] to-[#9B6BFF] px-6 py-3 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-[#4F7FFF]/30 transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#4F7FFF]/60"
+                disabled={loading}
+                className="ripple mt-8 w-full rounded-2xl bg-gradient-to-r from-[#4F7FFF] to-[#9B6BFF] px-6 py-4 text-sm font-semibold uppercase tracking-wide text-white shadow-lg shadow-[#4F7FFF]/30 transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#4F7FFF]/60"
               >
                 Run Assessment
               </button>
-            </div>
-            <div className="mt-4 flex flex-wrap items-center gap-3">
-              <button
-                onClick={() => handleRun()}
-                className="ripple rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-[#4F7FFF]/60"
-              >
-                {action}
-              </button>
-              <QuickChips chips={chips} onSelect={(value) => setInput(value)} />
-            </div>
-          </motion.div>
+            </motion.div>
+          )}
 
-          <PipelineLoader activeStep={activeStep} loading={loading} />
-
-          <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+          {mode === "processing" && (
             <motion.div
               whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
               transition={{ type: "spring", stiffness: 120, damping: 16 }}
-              className="glass glow-border rounded-3xl p-6"
+              className="glass glow-border mx-auto w-full max-w-3xl rounded-3xl p-8"
             >
-              <p className="text-xs uppercase tracking-[0.3em] text-muted">
-                What-If Simulator
-              </p>
-              <h2 className="mt-3 text-lg font-semibold text-white">
-                Adjust borrower signals to preview underwriting impact.
-              </h2>
-              <div className="mt-6 grid gap-4">
-                <div>
-                  <div className="flex items-center justify-between text-xs text-muted">
-                    <span>Monthly Income</span>
-                    <span className="text-white">${simIncome}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={2800}
-                    max={8500}
-                    step={100}
-                    value={simIncome}
-                    onChange={(event) => setSimIncome(Number(event.target.value))}
-                    className="mt-3 w-full accent-[#4F7FFF]"
-                  />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-xs text-muted">
-                    <span>Monthly Expenses</span>
-                    <span className="text-white">${simExpenses}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={800}
-                    max={4200}
-                    step={100}
-                    value={simExpenses}
-                    onChange={(event) => setSimExpenses(Number(event.target.value))}
-                    className="mt-3 w-full accent-[#9B6BFF]"
-                  />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-xs text-muted">
-                    <span>Employment Tenure</span>
-                    <span className="text-white">{simTenure} months</span>
-                  </div>
-                  <input
-                    type="range"
-                    min={6}
-                    max={96}
-                    step={3}
-                    value={simTenure}
-                    onChange={(event) => setSimTenure(Number(event.target.value))}
-                    className="mt-3 w-full accent-[#2EE59D]"
-                  />
-                </div>
+              <p className="text-xs uppercase tracking-[0.3em] text-muted">Processing</p>
+              <h2 className="mt-3 text-2xl font-semibold text-white">AI Decision Pipeline</h2>
+              <div className="mt-6">
+                <PipelineLoader activeStep={activeStep} loading={loading} />
               </div>
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
-                    Simulated Score
-                  </p>
-                  <p className="mt-2 text-3xl font-semibold text-white">
-                    <AnimatedValue value={simScore} className="text-3xl font-semibold text-white" />
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
-                    Approval Probability
-                  </p>
-                  <p className="mt-2 text-3xl font-semibold text-white">
-                    <AnimatedValue value={simApproval * 100} suffix="%" decimals={1} className="text-3xl font-semibold text-white" />
-                  </p>
-                </div>
-              </div>
-              <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/10">
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${simApproval * 100}%` }}
-                  transition={{ duration: 0.8 }}
-                  className="h-full rounded-full bg-gradient-to-r from-[#4F7FFF] to-[#9B6BFF]"
-                />
-              </div>
+              <motion.div
+                initial={{ opacity: 0.4 }}
+                animate={{ opacity: [0.4, 1, 0.4] }}
+                transition={{ duration: 2.2, repeat: Infinity }}
+                className="mt-6 text-center text-xs uppercase tracking-[0.4em] text-muted"
+              >
+                USER DATA → FEATURES → MODEL → FRAUD → DECISION
+              </motion.div>
             </motion.div>
+          )}
 
-            <motion.div
-              whileHover={{ y: -4, rotateX: 2, rotateY: 2 }}
-              transition={{ type: "spring", stiffness: 120, damping: 16 }}
-              className="glass glow-border rounded-3xl p-6"
-            >
-              <p className="text-xs uppercase tracking-[0.3em] text-muted">
-                Activity Feed
-              </p>
-              <p className="mt-3 text-sm text-muted">
-                Live underwriting telemetry captured for audit readiness.
-              </p>
-              <div className="mt-5 space-y-3">
-                <AnimatePresence initial={false}>
-                  {feed.map((item) => (
-                    <motion.div
-                      key={item.id}
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -6 }}
-                      className="rounded-2xl border border-white/10 bg-white/5 p-4"
+          {mode === "results" && riskResult && (
+            <div className="space-y-6">
+              <motion.div
+                whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
+                transition={{ type: "spring", stiffness: 120, damping: 16 }}
+                className="glass glow-border rounded-3xl p-8"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-4">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <p className="text-xs uppercase tracking-[0.3em] text-muted">Assessment Summary</p>
+                    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white">
+                      {assessmentStatus === "VERIFIED" ? "🟢 Verified Assessment" : "🟡 Preliminary Assessment"}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setMode("input")}
+                    className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:border-white/30 hover:bg-white/10"
+                  >
+                    New Assessment
+                  </button>
+                </div>
+                <p className="mt-3 text-sm text-muted">
+                  {verificationStatus === "COMPLETED"
+                    ? "Document verification completed."
+                    : "Document verification pending."}
+                </p>
+                <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Credit Score</p>
+                    <p className="mt-2 text-3xl font-semibold text-white">
+                      <AnimatedValue value={riskResult.score} className="text-3xl font-semibold text-white" />
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
+                      Approval Probability
+                    </p>
+                    <p className="mt-2 text-3xl font-semibold text-white">
+                      <AnimatedValue
+                        value={riskResult.approvalProbability * 100}
+                        suffix="%"
+                        decimals={1}
+                        className="text-3xl font-semibold text-white"
+                      />
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Risk Band</p>
+                    <p className="mt-2 text-2xl font-semibold text-white">{riskResult.riskBand}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
+                      Fraud Probability
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold text-white">
+                      {assessmentStatus === "VERIFIED" && fraudResult
+                        ? `${(fraudResult.probability * 100).toFixed(2)}%`
+                        : "N/A"}
+                    </p>
+                  </div>
+                </div>
+                {assessmentStatus === "PRELIMINARY" && (
+                  <div className="mt-6 grid gap-3 sm:grid-cols-[1fr_200px]">
+                    <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-muted">
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,application/pdf"
+                        onChange={handleFileChange}
+                        className="text-xs text-white file:mr-3 file:rounded-full file:border-0 file:bg-white/10 file:px-3 file:py-1 file:text-xs file:text-white"
+                      />
+                      {selectedFile ? selectedFile.name : "Upload documents to verify"}
+                    </label>
+                    <button
+                      onClick={handleVerify}
+                      disabled={loading || !selectedFile}
+                      className="ripple rounded-2xl bg-gradient-to-r from-[#4F7FFF] to-[#9B6BFF] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-[#4F7FFF]/30 transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#4F7FFF]/60"
                     >
-                      <p className="text-sm text-white">{item.message}</p>
-                      <p className="mt-2 text-[11px] text-muted">{item.time}</p>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-                {feed.length === 0 && (
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-muted">
-                    No audit events yet. Launch an assessment to capture underwriting logs.
+                      Upload Documents to Verify
+                    </button>
                   </div>
                 )}
-              </div>
-            </motion.div>
-          </div>
+              </motion.div>
 
-          <div className="grid gap-6 lg:grid-cols-2">
-            {showSkeleton && (
-              <>
-                {[0, 1, 2, 3].map((item) => (
-                  <div
-                    key={item}
-                    className="glass glow-border rounded-3xl p-6"
-                  >
-                    <div className="h-4 w-1/3 rounded-full bg-white/10" />
-                    <div className="mt-6 h-6 w-1/2 rounded-full bg-white/10" />
-                    <div className="mt-6 h-2 w-full rounded-full bg-white/10" />
-                    <div className="mt-3 h-2 w-5/6 rounded-full bg-white/10" />
-                    <div className="mt-6 grid gap-3 sm:grid-cols-2">
-                      <div className="h-16 rounded-2xl bg-white/5" />
-                      <div className="h-16 rounded-2xl bg-white/5" />
+              <div className="glass glow-border rounded-3xl p-6">
+                <div className="flex flex-wrap gap-3">
+                  {[
+                    { key: "overview", label: "Overview" },
+                    { key: "explainability", label: "Explainability" },
+                    { key: "fraud", label: "Fraud Analysis" },
+                    { key: "history", label: "History" },
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      onClick={() =>
+                        setActiveTab(tab.key as "overview" | "explainability" | "fraud" | "history")
+                      }
+                      className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-wide transition ${
+                        activeTab === tab.key
+                          ? "bg-white/15 text-white"
+                          : "border border-white/10 bg-white/5 text-muted hover:border-white/30 hover:bg-white/10"
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {activeTab === "overview" && (
+                <motion.div
+                  whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
+                  transition={{ type: "spring", stiffness: 120, damping: 16 }}
+                  className="glass glow-border rounded-3xl p-6"
+                >
+                  <p className="text-xs uppercase tracking-[0.3em] text-muted">Decision Overview</p>
+                  <p className="mt-3 text-lg font-semibold text-white">
+                    Model: {riskResult.model} • Confidence {(riskResult.confidence * 100).toFixed(1)}%
+                  </p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-muted">
+                      Latest assessment stored and audit-ready.
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-muted">
+                      {assessmentStatus === "VERIFIED"
+                        ? "Fraud checks completed with document verification."
+                        : "Document verification pending for fraud checks."}
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-muted">
+                      Explainability available for compliance review.
                     </div>
                   </div>
-                ))}
-              </>
-            )}
-            {riskResult && (
-              <RiskResultCard
-                data={riskResult}
-                onExplain={() => handleRun("Explain Decision")}
-                onCompare={() => handleRun("Compare Models")}
-              />
-            )}
-            {fraudResult && <FraudResultCard data={fraudResult} />}
-            {riskResult && <ExplainabilityCard factors={riskResult.factors} />}
-            {modelMetrics && (
-              <ModelComparisonCard
-                data={modelMetrics}
-                recommended="Gradient Boosting"
-              />
-            )}
-          </div>
+                </motion.div>
+              )}
 
-          {history.length > 0 && (
-            <motion.div
-              whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
-              transition={{ type: "spring", stiffness: 120, damping: 16 }}
-              className="glass glow-border rounded-3xl p-6"
-            >
-              <p className="text-xs uppercase tracking-[0.3em] text-muted">
-                Recent Assessments
-              </p>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                {history.map((item) => (
-                  <div
-                    key={item.timestamp}
-                    className="rounded-2xl border border-white/10 bg-white/5 p-4"
+              {activeTab === "explainability" && (
+                <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+                  <ExplainabilityCard factors={riskResult.factors} />
+                  <motion.div
+                    whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
+                    transition={{ type: "spring", stiffness: 120, damping: 16 }}
+                    className="glass glow-border rounded-3xl p-6"
                   >
-                    <p className="text-sm font-semibold text-white">
-                      Score {item.score} • {item.riskBand} Risk
+                    <p className="text-xs uppercase tracking-[0.3em] text-muted">
+                      What-If Simulator
                     </p>
-                    <p className="mt-2 text-xs text-muted">
-                      Approval {(item.approvalProbability * 100).toFixed(1)}% • Fraud{" "}
-                      {(item.fraudProbability * 100).toFixed(2)}% • Policy ready
+                    <h2 className="mt-3 text-lg font-semibold text-white">
+                      Adjust borrower signals to preview underwriting impact.
+                    </h2>
+                    <div className="mt-6 grid gap-4">
+                      <div>
+                        <div className="flex items-center justify-between text-xs text-muted">
+                          <span>Monthly Income</span>
+                          <span className="text-white">${simIncome}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={2800}
+                          max={8500}
+                          step={100}
+                          value={simIncome}
+                          onChange={(event) => setSimIncome(Number(event.target.value))}
+                          className="mt-3 w-full accent-[#4F7FFF]"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between text-xs text-muted">
+                          <span>Monthly Expenses</span>
+                          <span className="text-white">${simExpenses}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={800}
+                          max={4200}
+                          step={100}
+                          value={simExpenses}
+                          onChange={(event) => setSimExpenses(Number(event.target.value))}
+                          className="mt-3 w-full accent-[#9B6BFF]"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between text-xs text-muted">
+                          <span>Employment Tenure</span>
+                          <span className="text-white">{simTenure} months</span>
+                        </div>
+                        <input
+                          type="range"
+                          min={6}
+                          max={96}
+                          step={3}
+                          value={simTenure}
+                          onChange={(event) => setSimTenure(Number(event.target.value))}
+                          className="mt-3 w-full accent-[#2EE59D]"
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
+                          Simulated Score
+                        </p>
+                        <p className="mt-2 text-3xl font-semibold text-white">
+                          <AnimatedValue value={simScore} className="text-3xl font-semibold text-white" />
+                        </p>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
+                          Approval Probability
+                        </p>
+                        <p className="mt-2 text-3xl font-semibold text-white">
+                          <AnimatedValue
+                            value={simApproval * 100}
+                            suffix="%"
+                            decimals={1}
+                            className="text-3xl font-semibold text-white"
+                          />
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-white/10">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${simApproval * 100}%` }}
+                        transition={{ duration: 0.8 }}
+                        className="h-full rounded-full bg-gradient-to-r from-[#4F7FFF] to-[#9B6BFF]"
+                      />
+                    </div>
+                  </motion.div>
+                </div>
+              )}
+
+              {activeTab === "fraud" && (
+                <div className="grid gap-6 lg:grid-cols-2">
+                  {fraudResult ? (
+                    <FraudResultCard data={fraudResult} />
+                  ) : (
+                    <div className="glass glow-border rounded-3xl p-6 text-sm text-muted">
+                      Upload a document to run OCR-driven fraud analysis.
+                    </div>
+                  )}
+                  {ocrResult && (
+                    <motion.div
+                      whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
+                      transition={{ type: "spring", stiffness: 120, damping: 16 }}
+                      className="glass glow-border rounded-3xl p-6"
+                    >
+                      <p className="text-xs uppercase tracking-[0.3em] text-muted">OCR Preview</p>
+                      <div className="mt-5 grid gap-3 text-xs text-muted">
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Name</p>
+                          <p className="mt-2 text-sm text-white">{ocrResult.name ?? "Unavailable"}</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Employer</p>
+                          <p className="mt-2 text-sm text-white">{ocrResult.employer ?? "Unavailable"}</p>
+                        </div>
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                          <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Income</p>
+                          <p className="mt-2 text-sm text-white">
+                            {ocrResult.income ? `$${Math.round(ocrResult.income).toLocaleString()}` : "Unavailable"}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === "history" && (
+                <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+                  <motion.div
+                    whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
+                    transition={{ type: "spring", stiffness: 120, damping: 16 }}
+                    className="glass glow-border rounded-3xl p-6"
+                  >
+                    <p className="text-xs uppercase tracking-[0.3em] text-muted">
+                      Recent Assessments
                     </p>
-                    <p className="mt-2 text-xs text-muted">{item.timestamp}</p>
-                  </div>
-                ))}
-              </div>
-            </motion.div>
+                    <div className="mt-4 grid gap-3">
+                      {history.length === 0 && (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-muted">
+                          No assessment history loaded yet.
+                        </div>
+                      )}
+                      {history.map((item) => (
+                        <div
+                          key={item.timestamp}
+                          className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                        >
+                          <p className="text-sm font-semibold text-white">
+                            Score {item.score} • {item.riskBand} Risk
+                          </p>
+                          <p className="mt-2 text-xs text-muted">
+                            Approval {(item.approvalProbability * 100).toFixed(1)}% • Fraud{" "}
+                            {(item.fraudProbability * 100).toFixed(2)}% • Policy ready
+                          </p>
+                          <p className="mt-2 text-xs text-muted">{item.timestamp}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </motion.div>
+                  <motion.div
+                    whileHover={{ y: -4, rotateX: 2, rotateY: 2 }}
+                    transition={{ type: "spring", stiffness: 120, damping: 16 }}
+                    className="glass glow-border rounded-3xl p-6"
+                  >
+                    <p className="text-xs uppercase tracking-[0.3em] text-muted">Audit Feed</p>
+                    <p className="mt-3 text-sm text-muted">
+                      Live underwriting telemetry captured for audit readiness.
+                    </p>
+                    <div className="mt-5 space-y-3">
+                      <AnimatePresence initial={false}>
+                        {feed.map((item) => (
+                          <motion.div
+                            key={item.id}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -6 }}
+                            className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                          >
+                            <p className="text-sm text-white">{item.message}</p>
+                            <p className="mt-2 text-[11px] text-muted">{item.time}</p>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
+                      {feed.length === 0 && (
+                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-muted">
+                          No audit events yet. Run an assessment to capture activity logs.
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                </div>
+              )}
+            </div>
           )}
         </main>
       </motion.div>
