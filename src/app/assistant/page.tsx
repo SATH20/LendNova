@@ -6,6 +6,7 @@ import Sidebar from "@/components/Sidebar";
 import PipelineLoader from "@/components/PipelineLoader";
 import FraudResultCard from "@/components/FraudResultCard";
 import ExplainabilityCard from "@/components/ExplainabilityCard";
+import IdentityVerificationCard from "@/components/IdentityVerificationCard";
 import {
   fetchAssessments,
   runAssessment,
@@ -27,6 +28,9 @@ type RiskResult = {
   assessmentStatus: "PRELIMINARY" | "VERIFIED";
   verificationStatus: "PENDING" | "COMPLETED";
   fraudFlags: string[];
+  trustScore?: number;
+  identityStatus?: "VERIFIED" | "SUSPICIOUS" | "FAILED";
+  verificationReasons?: string[];
 };
 
 type FraudResult = {
@@ -117,6 +121,9 @@ export default function AssistantPage() {
     expenses: "1700",
     employmentType: "Full-time" as AssessmentInput["employment_type"],
     jobTenure: "3",
+    name: "",
+    employer: "",
+    mobile: "",
   });
 
   useEffect(() => {
@@ -193,6 +200,9 @@ export default function AssistantPage() {
     assessmentStatus: response.assessment_status,
     verificationStatus: response.verification_status,
     fraudFlags: response.fraud_flags ?? [],
+    trustScore: response.trust_score ?? undefined,
+    identityStatus: response.identity_status ?? undefined,
+    verificationReasons: response.verification_reasons ?? [],
   });
 
   const formatFactorName = (name: string) => {
@@ -221,7 +231,12 @@ export default function AssistantPage() {
       selectedFile,
       "payslip",
       assessmentId ?? undefined,
-      assessmentInput
+      {
+        ...assessmentInput,
+        name: formData.name,
+        employer: formData.employer,
+        mobile: formData.mobile,
+      }
     );
     setOcrResult(ocr);
     addFeed("OCR extraction completed.");
@@ -480,6 +495,50 @@ export default function AssistantPage() {
                     />
                   </div>
                 </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.25em] text-muted">
+                      Full Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.name}
+                      onChange={(event) =>
+                        setFormData((prev) => ({ ...prev, name: event.target.value }))
+                      }
+                      placeholder="John Doe"
+                      className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-[#4F7FFF]/70 focus:ring-2 focus:ring-[#4F7FFF]/30"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.25em] text-muted">
+                      Employer (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.employer}
+                      onChange={(event) =>
+                        setFormData((prev) => ({ ...prev, employer: event.target.value }))
+                      }
+                      placeholder="Company Name"
+                      className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-[#4F7FFF]/70 focus:ring-2 focus:ring-[#4F7FFF]/30"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs uppercase tracking-[0.25em] text-muted">
+                      Mobile (Optional)
+                    </label>
+                    <input
+                      type="tel"
+                      value={formData.mobile}
+                      onChange={(event) =>
+                        setFormData((prev) => ({ ...prev, mobile: event.target.value }))
+                      }
+                      placeholder="+1234567890"
+                      className="mt-3 w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none transition focus:border-[#4F7FFF]/70 focus:ring-2 focus:ring-[#4F7FFF]/30"
+                    />
+                  </div>
+                </div>
                 <div>
                   <label className="text-xs uppercase tracking-[0.25em] text-muted">
                     Optional Document Upload
@@ -583,6 +642,16 @@ export default function AssistantPage() {
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                     <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Risk Band</p>
                     <p className="mt-2 text-2xl font-semibold text-white">{riskResult.riskBand}</p>
+                  </div>
+                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
+                      Trust Score
+                    </p>
+                    <p className="mt-2 text-2xl font-semibold text-white">
+                      {verificationStatus === "COMPLETED" && riskResult.trustScore !== undefined
+                        ? `${(riskResult.trustScore * 100).toFixed(1)}%`
+                        : "N/A"}
+                    </p>
                   </div>
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                     <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
@@ -767,36 +836,93 @@ export default function AssistantPage() {
               )}
 
               {activeTab === "fraud" && (
-                <div className="grid gap-6 lg:grid-cols-2">
-                  {fraudResult ? (
-                    <FraudResultCard data={fraudResult} />
-                  ) : (
-                    <div className="glass glow-border rounded-3xl p-6 text-sm text-muted">
-                      Upload a document to run OCR-driven fraud analysis.
-                    </div>
-                  )}
-                  {ocrResult && (
+                <div className="space-y-6">
+                  {riskResult.trustScore !== undefined &&
+                    riskResult.identityStatus &&
+                    riskResult.verificationReasons && (
+                      <IdentityVerificationCard
+                        data={{
+                          trustScore: riskResult.trustScore,
+                          identityStatus: riskResult.identityStatus,
+                          verificationReasons: riskResult.verificationReasons,
+                        }}
+                      />
+                    )}
+                  <div className="grid gap-6 lg:grid-cols-2">
+                    {fraudResult ? (
+                      <FraudResultCard data={fraudResult} />
+                    ) : (
+                      <div className="glass glow-border rounded-3xl p-6 text-sm text-muted">
+                        Upload a document to run OCR-driven fraud analysis.
+                      </div>
+                    )}
+                    {ocrResult && (
+                      <motion.div
+                        whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
+                        transition={{ type: "spring", stiffness: 120, damping: 16 }}
+                        className="glass glow-border rounded-3xl p-6"
+                      >
+                        <p className="text-xs uppercase tracking-[0.3em] text-muted">OCR Preview</p>
+                        <div className="mt-5 grid gap-3 text-xs text-muted">
+                          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Name</p>
+                            <p className="mt-2 text-sm text-white">{ocrResult.name ?? "Unavailable"}</p>
+                          </div>
+                          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Employer</p>
+                            <p className="mt-2 text-sm text-white">{ocrResult.employer ?? "Unavailable"}</p>
+                          </div>
+                          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Income</p>
+                            <p className="mt-2 text-sm text-white">
+                              {ocrResult.income ? `${Math.round(ocrResult.income).toLocaleString()}` : "Unavailable"}
+                            </p>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+                  {riskResult.verificationReasons && riskResult.verificationReasons.length > 0 && (
                     <motion.div
-                      whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
+                      whileHover={{ y: -4, rotateX: 2, rotateY: 2 }}
                       transition={{ type: "spring", stiffness: 120, damping: 16 }}
                       className="glass glow-border rounded-3xl p-6"
                     >
-                      <p className="text-xs uppercase tracking-[0.3em] text-muted">OCR Preview</p>
-                      <div className="mt-5 grid gap-3 text-xs text-muted">
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                          <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Name</p>
-                          <p className="mt-2 text-sm text-white">{ocrResult.name ?? "Unavailable"}</p>
-                        </div>
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                          <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Employer</p>
-                          <p className="mt-2 text-sm text-white">{ocrResult.employer ?? "Unavailable"}</p>
-                        </div>
-                        <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                          <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Income</p>
-                          <p className="mt-2 text-sm text-white">
-                            {ocrResult.income ? `$${Math.round(ocrResult.income).toLocaleString()}` : "Unavailable"}
-                          </p>
-                        </div>
+                      <p className="text-xs uppercase tracking-[0.3em] text-muted">
+                        Why Risk Increased
+                      </p>
+                      <p className="mt-3 text-lg font-semibold text-white">
+                        Fraud Analysis Explanation
+                      </p>
+                      <div className="mt-5 space-y-3">
+                        {riskResult.verificationReasons.map((reason, index) => (
+                          <div
+                            key={index}
+                            className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                          >
+                            <div className="flex items-start gap-3">
+                              <span className="text-[#FF5C5C]">?</span>
+                              <div>
+                                <p className="text-sm font-semibold text-white">{reason}</p>
+                                <p className="mt-2 text-xs text-muted">
+                                  {reason.includes("mismatch")
+                                    ? "Data inconsistency detected between user input and document verification."
+                                    : reason.includes("confidence")
+                                    ? "OCR extraction quality below acceptable threshold for reliable verification."
+                                    : reason.includes("metadata")
+                                    ? "Document metadata indicates potential tampering or non-authentic source."
+                                    : reason.includes("income")
+                                    ? "Income pattern analysis suggests potential data manipulation."
+                                    : reason.includes("tenure")
+                                    ? "Employment tenure inconsistent with reported income level."
+                                    : reason.includes("submissions")
+                                    ? "Behavioral pattern indicates potential fraudulent activity."
+                                    : "Verification check flagged this item for manual review."}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </motion.div>
                   )}
