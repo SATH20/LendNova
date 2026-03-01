@@ -63,10 +63,12 @@ def predict():
             job_tenure=data["job_tenure"],
             credit_score=credit_score,
             approval_probability=prob,
-            fraud_probability=0.0,
+            fraud_probability=None,
             risk_band=risk_band,
             model_used=stats.get("model") or type(model).__name__,
             confidence_score=confidence_score,
+            assessment_status="PRELIMINARY",
+            verification_status="PENDING",
         )
 
         db.session.add(assessment)
@@ -74,6 +76,10 @@ def predict():
 
         result = output_schema.dump(assessment)
         result["top_factors"] = top_factors
+        result["fraud_probability"] = None
+        result["fraud_flags"] = []
+        result["assessment_status"] = "PRELIMINARY"
+        result["verification_status"] = "PENDING"
 
         return jsonify(result), 200
 

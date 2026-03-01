@@ -1,11 +1,16 @@
 import os
+import json
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from services.ocr_service import extract_text_from_image
-from database.models import Document, db
+from services.fraud_engine import detect_fraud
+from database.models import Document, Assessment, db
+from database.schemas import AssessmentInputSchema, AssessmentOutputSchema
 from utils.helpers import mask_text
 
 ocr_bp = Blueprint('ocr', __name__)
+input_schema = AssessmentInputSchema()
+output_schema = AssessmentOutputSchema()
 
 def allowed_file(filename):
     allowed = current_app.config.get("ALLOWED_EXTENSIONS", {"png", "jpg", "jpeg", "pdf"})
@@ -56,6 +61,31 @@ def ocr_extract():
     db.session.add(document)
     db.session.commit()
 
+    assessment_payload = None
+    fraud_result = None
+
+    if assessment_id is not None:
+        assessment = Assessment.query.get(assessment_id)
+        if assessment:
+            form_data = {
+                "income": request.form.get("income"),
+                "expenses": request.form.get("expenses"),
+                "employment_type": request.form.get("employment_type"),
+                "job_tenure": request.form.get("job_tenure"),
+            }
+            try:
+                loaded_form = input_schema.load(form_data)
+                fraud_result = detect_fraud(loaded_form, extracted_data)
+                assessment.fraud_probability = fraud_result.get("fraud_probability")
+                assessment.assessment_status = "VERIFIED"
+                assessment.verification_status = "COMPLETED"
+                document.fraud_flags = json.dumps(fraud_result.get("flags", []))
+                db.session.commit()
+                assessment_payload = output_schema.dump(assessment)
+                assessment_payload["fraud_flags"] = fraud_result.get("flags", [])
+            except Exception:
+                db.session.rollback()
+
     response = {
         "name": extracted_data.get("name"),
         "income": extracted_data.get("income"),
@@ -63,5 +93,11 @@ def ocr_extract():
         "extracted_text": masked_text,
         "document_id": document.id,
     }
+
+    if assessment_payload:
+        response["assessment"] = assessment_payload
+    if fraud_result:
+        response["fraud_probability"] = fraud_result.get("fraud_probability")
+        response["fraud_flags"] = fraud_result.get("flags", [])
 
     return jsonify(response), 200
