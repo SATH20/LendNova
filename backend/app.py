@@ -69,6 +69,10 @@ def _ensure_assessments_schema():
             "confidence_score",
             "assessment_status",
             "verification_status",
+            "trust_score",
+            "identity_status",
+            "verification_reasons",
+            "identity_hash",
         }
         if required_cols.issubset(existing_cols):
             return
@@ -90,7 +94,11 @@ def _ensure_assessments_schema():
                 model_used VARCHAR(50) NOT NULL,
                 confidence_score FLOAT NOT NULL,
                 assessment_status VARCHAR(20) NOT NULL,
-                verification_status VARCHAR(20) NOT NULL
+                verification_status VARCHAR(20) NOT NULL,
+                trust_score FLOAT,
+                identity_status VARCHAR(20),
+                verification_reasons TEXT,
+                identity_hash VARCHAR(128)
             )
             """
         )
@@ -110,7 +118,11 @@ def _ensure_assessments_schema():
                 model_used,
                 confidence_score,
                 assessment_status,
-                verification_status
+                verification_status,
+                trust_score,
+                identity_status,
+                verification_reasons,
+                identity_hash
             )
             SELECT
                 id,
@@ -126,7 +138,11 @@ def _ensure_assessments_schema():
                 model_used,
                 confidence_score,
                 'PRELIMINARY',
-                'PENDING'
+                'PENDING',
+                NULL,
+                NULL,
+                NULL,
+                NULL
             FROM assessments_old
             """
         )

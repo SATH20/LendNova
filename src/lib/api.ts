@@ -16,6 +16,9 @@ export type PredictResponse = {
   verification_status: "PENDING" | "COMPLETED";
   fraud_probability?: number | null;
   fraud_flags?: string[];
+  trust_score?: number | null;
+  identity_status?: "VERIFIED" | "SUSPICIOUS" | "FAILED" | null;
+  verification_reasons?: string[];
   top_factors: { factor: string; impact: number }[];
 };
 
@@ -28,6 +31,9 @@ export type OcrResponse = {
   assessment?: PredictResponse;
   fraud_probability?: number;
   fraud_flags?: string[];
+  trust_score?: number | null;
+  identity_status?: "VERIFIED" | "SUSPICIOUS" | "FAILED" | null;
+  verification_reasons?: string[];
 };
 
 export type FraudResponse = {
@@ -98,7 +104,7 @@ export async function uploadDocument(
   file: File,
   documentType?: string,
   assessmentId?: number,
-  formValues?: AssessmentInput
+  formValues?: AssessmentInput & { name?: string; employer?: string; mobile?: string }
 ): Promise<OcrResponse> {
   const formData = new FormData();
   formData.append("file", file);
@@ -113,6 +119,15 @@ export async function uploadDocument(
     formData.append("expenses", String(formValues.expenses));
     formData.append("employment_type", formValues.employment_type);
     formData.append("job_tenure", String(formValues.job_tenure));
+    if (formValues.name) {
+      formData.append("name", formValues.name);
+    }
+    if (formValues.employer) {
+      formData.append("employer", formValues.employer);
+    }
+    if (formValues.mobile) {
+      formData.append("mobile", formValues.mobile);
+    }
   }
   const response = await fetchWithTimeout(`${API_URL}/api/ocr-extract`, {
     method: "POST",

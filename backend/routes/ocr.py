@@ -3,7 +3,7 @@ import json
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from services.ocr_service import extract_text_from_image
-from services.fraud_engine import detect_fraud
+from services.identity_verification import verify_identity
 from database.models import Document, Assessment, db
 from database.schemas import AssessmentInputSchema, AssessmentOutputSchema
 from utils.helpers import mask_text
@@ -62,7 +62,11 @@ def ocr_extract():
     db.session.commit()
 
     assessment_payload = None
-    fraud_result = None
+    verification_result = None
+
+    has_income = extracted_data.get("income") is not None
+    has_name = bool((extracted_data.get("name") or "").strip())
+    has_structured = has_income or has_name
 
     if assessment_id is not None:
         assessment = Assessment.query.get(assessment_id)
@@ -73,16 +77,38 @@ def ocr_extract():
                 "employment_type": request.form.get("employment_type"),
                 "job_tenure": request.form.get("job_tenure"),
             }
+            identity_data = {
+                "name": request.form.get("name"),
+                "employer": request.form.get("employer"),
+                "mobile": request.form.get("mobile"),
+            }
             try:
-                loaded_form = input_schema.load(form_data)
-                fraud_result = detect_fraud(loaded_form, extracted_data)
-                assessment.fraud_probability = fraud_result.get("fraud_probability")
-                assessment.assessment_status = "VERIFIED"
-                assessment.verification_status = "COMPLETED"
-                document.fraud_flags = json.dumps(fraud_result.get("flags", []))
+                if has_structured:
+                    loaded_form = input_schema.load(form_data)
+                    verification_form = {**loaded_form, **identity_data}
+                    verification_result = verify_identity(verification_form, extracted_data, file_path)
+                    assessment.fraud_probability = verification_result.get("fraud_probability")
+                    assessment.trust_score = verification_result.get("trust_score")
+                    assessment.identity_status = verification_result.get("identity_status")
+                    assessment.verification_reasons = json.dumps(
+                        verification_result.get("verification_reasons", [])
+                    )
+                    assessment.identity_hash = verification_result.get("identity_hash")
+                    assessment.assessment_status = "VERIFIED"
+                    assessment.verification_status = "COMPLETED"
+                    document.fraud_flags = json.dumps(verification_result.get("verification_reasons", []))
+                else:
+                    assessment.fraud_probability = None
+                    assessment.trust_score = None
+                    assessment.identity_status = None
+                    assessment.verification_reasons = json.dumps([])
+                    assessment.assessment_status = "PRELIMINARY"
+                    assessment.verification_status = "PENDING"
+                    document.fraud_flags = ""
                 db.session.commit()
                 assessment_payload = output_schema.dump(assessment)
-                assessment_payload["fraud_flags"] = fraud_result.get("flags", [])
+                if verification_result:
+                    assessment_payload["fraud_flags"] = verification_result.get("verification_reasons", [])
             except Exception:
                 db.session.rollback()
 
@@ -96,8 +122,11 @@ def ocr_extract():
 
     if assessment_payload:
         response["assessment"] = assessment_payload
-    if fraud_result:
-        response["fraud_probability"] = fraud_result.get("fraud_probability")
-        response["fraud_flags"] = fraud_result.get("flags", [])
+    if verification_result:
+        response["fraud_probability"] = verification_result.get("fraud_probability")
+        response["fraud_flags"] = verification_result.get("verification_reasons", [])
+        response["trust_score"] = verification_result.get("trust_score")
+        response["identity_status"] = verification_result.get("identity_status")
+        response["verification_reasons"] = verification_result.get("verification_reasons", [])
 
     return jsonify(response), 200

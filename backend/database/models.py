@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 from .db import db
 
 class Assessment(db.Model):
@@ -22,6 +23,10 @@ class Assessment(db.Model):
     confidence_score = db.Column(db.Float, nullable=False)
     assessment_status = db.Column(db.String(20), nullable=False, default="PRELIMINARY")
     verification_status = db.Column(db.String(20), nullable=False, default="PENDING")
+    trust_score = db.Column(db.Float, nullable=True)
+    identity_status = db.Column(db.String(20), nullable=True)
+    verification_reasons = db.Column(db.Text, nullable=True)
+    identity_hash = db.Column(db.String(128), nullable=True)
     
     # Relationship
     documents = db.relationship('Document', backref='assessment', lazy=True)
@@ -36,7 +41,10 @@ class Assessment(db.Model):
             'risk_band': self.risk_band,
             'model_used': self.model_used,
             'assessment_status': self.assessment_status,
-            'verification_status': self.verification_status
+            'verification_status': self.verification_status,
+            'trust_score': self.trust_score,
+            'identity_status': self.identity_status,
+            'verification_reasons': json.loads(self.verification_reasons) if self.verification_reasons else []
         }
 
 class Document(db.Model):
