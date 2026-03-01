@@ -25,12 +25,21 @@ type RiskResult = {
   confidence: number;
   factors: { name: string; impact: number }[];
   fraudProbability: number;
-  assessmentStatus: "PRELIMINARY" | "VERIFIED";
-  verificationStatus: "PENDING" | "COMPLETED";
+  assessmentStatus: "PRELIMINARY" | "VERIFIED" | "PARTIAL";
+  assessmentStage: "PRELIMINARY" | "VERIFIED" | "PARTIAL";
+  verificationStatus: "PENDING" | "COMPLETED" | "INCOMPLETE" | "VERIFIED" | "PARTIAL" | "FAILED";
   fraudFlags: string[];
+  verificationFlags: string[];
   trustScore?: number;
   identityStatus?: "VERIFIED" | "SUSPICIOUS" | "FAILED";
   verificationReasons?: string[];
+  declaredIncome?: number;
+  verifiedIncome?: number;
+  declaredExpense?: number;
+  verifiedExpense?: number;
+  verificationMethod?: string;
+  incomeStabilityScore?: number;
+  expensePatternScore?: number;
 };
 
 type FraudResult = {
@@ -110,10 +119,10 @@ export default function AssistantPage() {
   const [ocrResult, setOcrResult] = useState<OcrResponse | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [assessmentId, setAssessmentId] = useState<number | null>(null);
-  const [assessmentStatus, setAssessmentStatus] = useState<"PRELIMINARY" | "VERIFIED">(
+  const [assessmentStatus, setAssessmentStatus] = useState<"PRELIMINARY" | "VERIFIED" | "PARTIAL">(
     "PRELIMINARY"
   );
-  const [verificationStatus, setVerificationStatus] = useState<"PENDING" | "COMPLETED">(
+  const [verificationStatus, setVerificationStatus] = useState<"PENDING" | "COMPLETED" | "INCOMPLETE" | "VERIFIED" | "PARTIAL" | "FAILED">(
     "PENDING"
   );
   const [formData, setFormData] = useState({
@@ -146,7 +155,7 @@ export default function AssistantPage() {
   }, []);
 
   useEffect(() => {
-    if (verificationStatus !== "COMPLETED" && activeTab === "fraud") {
+    if (!["COMPLETED", "VERIFIED"].includes(verificationStatus) && activeTab === "fraud") {
       setActiveTab("overview");
     }
   }, [verificationStatus, activeTab]);
@@ -198,11 +207,20 @@ export default function AssistantPage() {
     })),
     fraudProbability: response.fraud_probability ?? 0,
     assessmentStatus: response.assessment_status,
+    assessmentStage: response.assessment_stage ?? response.assessment_status,
     verificationStatus: response.verification_status,
     fraudFlags: response.fraud_flags ?? [],
+    verificationFlags: response.verification_flags ?? [],
     trustScore: response.trust_score ?? undefined,
     identityStatus: response.identity_status ?? undefined,
     verificationReasons: response.verification_reasons ?? [],
+    declaredIncome: response.declared_income ?? undefined,
+    verifiedIncome: response.verified_income ?? undefined,
+    declaredExpense: response.declared_expense ?? undefined,
+    verifiedExpense: response.verified_expense ?? undefined,
+    verificationMethod: response.verification_method ?? undefined,
+    incomeStabilityScore: response.income_stability_score ?? undefined,
+    expensePatternScore: response.expense_pattern_score ?? undefined,
   });
 
   const formatFactorName = (name: string) => {
@@ -602,10 +620,19 @@ export default function AssistantPage() {
                   <div className="flex flex-wrap items-center gap-3">
                     <p className="text-xs uppercase tracking-[0.3em] text-muted">Assessment Summary</p>
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white">
-                      {verificationStatus === "COMPLETED"
+                      {["COMPLETED", "VERIFIED"].includes(verificationStatus)
                         ? "🟢 Verified Assessment"
+                        : verificationStatus === "PARTIAL"
+                        ? "🟡 Partially Verified"
+                        : verificationStatus === "INCOMPLETE"
+                        ? "🟠 Incomplete Verification"
                         : "🟡 Preliminary Assessment"}
                     </span>
+                    {riskResult.verificationMethod && (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-muted">
+                        Method: {riskResult.verificationMethod}
+                      </span>
+                    )}
                   </div>
                   <button
                     onClick={() => setMode("input")}
@@ -615,8 +642,12 @@ export default function AssistantPage() {
                   </button>
                 </div>
                 <p className="mt-3 text-sm text-muted">
-                  {verificationStatus === "COMPLETED"
+                  {["COMPLETED", "VERIFIED"].includes(verificationStatus)
                     ? "Document verification completed."
+                    : verificationStatus === "PARTIAL"
+                    ? "Partial verification completed. Upload additional documents for full verification."
+                    : verificationStatus === "INCOMPLETE"
+                    ? "Required documents missing. Upload documents to complete verification."
                     : "Upload documents to complete verification."}
                 </p>
                 <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -648,23 +679,83 @@ export default function AssistantPage() {
                       Trust Score
                     </p>
                     <p className="mt-2 text-2xl font-semibold text-white">
-                      {verificationStatus === "COMPLETED" && riskResult.trustScore !== undefined
+                      {["COMPLETED", "VERIFIED"].includes(verificationStatus) && riskResult.trustScore !== undefined
                         ? `${(riskResult.trustScore * 100).toFixed(1)}%`
                         : "N/A"}
                     </p>
                   </div>
+                </div>
+                {riskResult.verifiedIncome !== undefined && (
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
+                        Income Verification
+                      </p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="text-lg font-semibold text-white">
+                          ✔ Verified: ${riskResult.verifiedIncome?.toLocaleString()}
+                        </span>
+                      </div>
+                      {riskResult.declaredIncome && riskResult.declaredIncome !== riskResult.verifiedIncome && (
+                        <p className="mt-1 text-xs text-muted">
+                          Declared: ${riskResult.declaredIncome.toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
+                        Expense Verification
+                      </p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="text-lg font-semibold text-white">
+                          {riskResult.verifiedExpense !== undefined 
+                            ? `✔ Verified: $${riskResult.verifiedExpense.toLocaleString()}`
+                            : "⚠ Not Verified"}
+                        </span>
+                      </div>
+                      {riskResult.declaredExpense && riskResult.verifiedExpense && riskResult.declaredExpense !== riskResult.verifiedExpense && (
+                        <p className="mt-1 text-xs text-muted">
+                          Declared: ${riskResult.declaredExpense.toLocaleString()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {riskResult.verificationFlags && riskResult.verificationFlags.length > 0 && (
+                  <div className="mt-4 rounded-2xl border border-[#FF5C5C]/30 bg-[#FF5C5C]/10 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#FF5C5C]">
+                      Verification Flags
+                    </p>
+                    <ul className="mt-2 space-y-1 text-xs text-[#FF5C5C]">
+                      {riskResult.verificationFlags.map((flag, idx) => (
+                        <li key={idx}>• {flag}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                     <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
                       Fraud Probability
                     </p>
                     <p className="mt-2 text-2xl font-semibold text-white">
-                      {verificationStatus === "COMPLETED" && fraudResult
+                      {["COMPLETED", "VERIFIED"].includes(verificationStatus) && fraudResult
                         ? `${(fraudResult.probability * 100).toFixed(2)}%`
                         : "N/A"}
                     </p>
                   </div>
+                  {riskResult.incomeStabilityScore !== undefined && (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
+                        Income Stability
+                      </p>
+                      <p className="mt-2 text-2xl font-semibold text-white">
+                        {(riskResult.incomeStabilityScore * 100).toFixed(0)}%
+                      </p>
+                    </div>
+                  )}
                 </div>
-                {verificationStatus !== "COMPLETED" && (
+                {!["COMPLETED", "VERIFIED"].includes(verificationStatus) && (
                   <div className="mt-6 grid gap-3 sm:grid-cols-[1fr_200px]">
                     <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-muted">
                       <input
@@ -691,7 +782,7 @@ export default function AssistantPage() {
                   {[
                     { key: "overview", label: "Overview" },
                     { key: "explainability", label: "Explainability" },
-                    ...(verificationStatus === "COMPLETED"
+                    ...(["COMPLETED", "VERIFIED"].includes(verificationStatus)
                       ? [{ key: "fraud", label: "Fraud Analysis" }]
                       : []),
                     { key: "history", label: "History" },
@@ -728,7 +819,7 @@ export default function AssistantPage() {
                       Latest assessment stored and audit-ready.
                     </div>
                     <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-muted">
-                      {assessmentStatus === "VERIFIED"
+                      {["COMPLETED", "VERIFIED"].includes(assessmentStatus)
                         ? "Fraud checks completed with document verification."
                         : "Document verification pending for fraud checks."}
                     </div>

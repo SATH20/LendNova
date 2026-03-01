@@ -62,6 +62,11 @@ def predict():
             expenses=mask_amount(data["expenses"]),
             employment_type=data["employment_type"],
             job_tenure=data["job_tenure"],
+            declared_income=mask_amount(data["income"]),
+            declared_expense=mask_amount(data["expenses"]),
+            verified_income=None,
+            verified_expense=None,
+            verification_method=None,
             credit_score=credit_score,
             approval_probability=prob,
             fraud_probability=None,
@@ -69,10 +74,14 @@ def predict():
             model_used=stats.get("model") or type(model).__name__,
             confidence_score=confidence_score,
             assessment_status="PRELIMINARY",
+            assessment_stage="PRELIMINARY",
             verification_status="PENDING",
             trust_score=None,
             identity_status=None,
             verification_reasons=json.dumps([]),
+            verification_flags=json.dumps([]),
+            income_stability_score=None,
+            expense_pattern_score=None,
         )
 
         db.session.add(assessment)
