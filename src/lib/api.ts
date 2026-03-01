@@ -12,13 +12,22 @@ export type PredictResponse = {
   risk_band: "Low" | "Medium" | "High";
   model_used: string;
   confidence_score: number;
-  assessment_status: "PRELIMINARY" | "VERIFIED";
-  verification_status: "PENDING" | "COMPLETED";
+  assessment_status: "PRELIMINARY" | "VERIFIED" | "PARTIAL";
+  assessment_stage: "PRELIMINARY" | "VERIFIED" | "PARTIAL";
+  verification_status: "PENDING" | "COMPLETED" | "INCOMPLETE" | "VERIFIED" | "PARTIAL" | "FAILED";
   fraud_probability?: number | null;
   fraud_flags?: string[];
+  verification_flags?: string[];
   trust_score?: number | null;
   identity_status?: "VERIFIED" | "SUSPICIOUS" | "FAILED" | null;
   verification_reasons?: string[];
+  declared_income?: number | null;
+  verified_income?: number | null;
+  declared_expense?: number | null;
+  verified_expense?: number | null;
+  verification_method?: string | null;
+  income_stability_score?: number | null;
+  expense_pattern_score?: number | null;
   top_factors: { factor: string; impact: number }[];
 };
 
@@ -31,9 +40,17 @@ export type OcrResponse = {
   assessment?: PredictResponse;
   fraud_probability?: number;
   fraud_flags?: string[];
+  verification_flags?: string[];
   trust_score?: number | null;
   identity_status?: "VERIFIED" | "SUSPICIOUS" | "FAILED" | null;
   verification_reasons?: string[];
+  verified_income?: number | null;
+  verified_expense?: number | null;
+  verification_method?: string | null;
+  verification_status?: string | null;
+  assessment_stage?: string | null;
+  income_stability_score?: number | null;
+  expense_pattern_score?: number | null;
 };
 
 export type FraudResponse = {

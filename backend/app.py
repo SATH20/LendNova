@@ -68,11 +68,20 @@ def _ensure_assessments_schema():
             "model_used",
             "confidence_score",
             "assessment_status",
+            "assessment_stage",
             "verification_status",
             "trust_score",
             "identity_status",
             "verification_reasons",
+            "verification_flags",
             "identity_hash",
+            "declared_income",
+            "verified_income",
+            "declared_expense",
+            "verified_expense",
+            "verification_method",
+            "income_stability_score",
+            "expense_pattern_score",
         }
         if required_cols.issubset(existing_cols):
             return
@@ -87,6 +96,11 @@ def _ensure_assessments_schema():
                 expenses FLOAT NOT NULL,
                 employment_type VARCHAR(50) NOT NULL,
                 job_tenure FLOAT NOT NULL,
+                declared_income FLOAT,
+                verified_income FLOAT,
+                declared_expense FLOAT,
+                verified_expense FLOAT,
+                verification_method VARCHAR(50),
                 credit_score INTEGER NOT NULL,
                 approval_probability FLOAT NOT NULL,
                 fraud_probability FLOAT,
@@ -94,11 +108,15 @@ def _ensure_assessments_schema():
                 model_used VARCHAR(50) NOT NULL,
                 confidence_score FLOAT NOT NULL,
                 assessment_status VARCHAR(20) NOT NULL,
+                assessment_stage VARCHAR(20) NOT NULL,
                 verification_status VARCHAR(20) NOT NULL,
                 trust_score FLOAT,
                 identity_status VARCHAR(20),
                 verification_reasons TEXT,
-                identity_hash VARCHAR(128)
+                verification_flags TEXT,
+                identity_hash VARCHAR(128),
+                income_stability_score FLOAT,
+                expense_pattern_score FLOAT
             )
             """
         )
@@ -118,11 +136,20 @@ def _ensure_assessments_schema():
                 model_used,
                 confidence_score,
                 assessment_status,
+                assessment_stage,
                 verification_status,
                 trust_score,
                 identity_status,
                 verification_reasons,
-                identity_hash
+                verification_flags,
+                identity_hash,
+                declared_income,
+                verified_income,
+                declared_expense,
+                verified_expense,
+                verification_method,
+                income_stability_score,
+                expense_pattern_score
             )
             SELECT
                 id,
@@ -138,7 +165,16 @@ def _ensure_assessments_schema():
                 model_used,
                 confidence_score,
                 'PRELIMINARY',
+                'PRELIMINARY',
                 'PENDING',
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                NULL,
+                income,
+                NULL,
+                expenses,
                 NULL,
                 NULL,
                 NULL,
