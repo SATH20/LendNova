@@ -11,6 +11,7 @@ numpy
 joblib
 pytesseract
 pdf2image
+PyPDF2
 python-dotenv
 Pillow
 marshmallow-sqlalchemy

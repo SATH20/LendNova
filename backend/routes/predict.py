@@ -1,4 +1,5 @@
 import os
+import json
 import joblib
 import pandas as pd
 from flask import Blueprint, request, jsonify, current_app
@@ -69,6 +70,9 @@ def predict():
             confidence_score=confidence_score,
             assessment_status="PRELIMINARY",
             verification_status="PENDING",
+            trust_score=None,
+            identity_status=None,
+            verification_reasons=json.dumps([]),
         )
 
         db.session.add(assessment)
@@ -80,6 +84,9 @@ def predict():
         result["fraud_flags"] = []
         result["assessment_status"] = "PRELIMINARY"
         result["verification_status"] = "PENDING"
+        result["trust_score"] = None
+        result["identity_status"] = None
+        result["verification_reasons"] = []
 
         return jsonify(result), 200
 

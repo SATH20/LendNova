@@ -1,3 +1,4 @@
+import json
 from marshmallow import Schema, fields, validate
 
 class AssessmentInputSchema(Schema):
@@ -14,10 +15,23 @@ class AssessmentOutputSchema(Schema):
     fraud_probability = fields.Float(allow_none=True)
     assessment_status = fields.Str()
     verification_status = fields.Str()
+    trust_score = fields.Float(allow_none=True)
+    identity_status = fields.Str(allow_none=True)
+    verification_reasons = fields.Method("get_reasons")
     risk_band = fields.Str()
     model_used = fields.Str()
     confidence_score = fields.Float()
     top_factors = fields.List(fields.Dict())
+
+    def get_reasons(self, obj):
+        if not getattr(obj, "verification_reasons", None):
+            return []
+        if isinstance(obj.verification_reasons, list):
+            return obj.verification_reasons
+        try:
+            return json.loads(obj.verification_reasons)
+        except Exception:
+            return []
 
 class OcrResultSchema(Schema):
     name = fields.Str()

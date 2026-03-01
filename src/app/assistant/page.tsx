@@ -138,6 +138,12 @@ export default function AssistantPage() {
     loadHistory();
   }, []);
 
+  useEffect(() => {
+    if (verificationStatus !== "COMPLETED" && activeTab === "fraud") {
+      setActiveTab("overview");
+    }
+  }, [verificationStatus, activeTab]);
+
   const statusChips = useMemo(
     () => ["Secure", `Model: ${riskResult?.model ?? "Gradient Boosting"}`, "v1.0", "Live"],
     [riskResult?.model]
@@ -537,7 +543,9 @@ export default function AssistantPage() {
                   <div className="flex flex-wrap items-center gap-3">
                     <p className="text-xs uppercase tracking-[0.3em] text-muted">Assessment Summary</p>
                     <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-white">
-                      {assessmentStatus === "VERIFIED" ? "🟢 Verified Assessment" : "🟡 Preliminary Assessment"}
+                      {verificationStatus === "COMPLETED"
+                        ? "🟢 Verified Assessment"
+                        : "🟡 Preliminary Assessment"}
                     </span>
                   </div>
                   <button
@@ -550,7 +558,7 @@ export default function AssistantPage() {
                 <p className="mt-3 text-sm text-muted">
                   {verificationStatus === "COMPLETED"
                     ? "Document verification completed."
-                    : "Document verification pending."}
+                    : "Upload documents to complete verification."}
                 </p>
                 <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -581,13 +589,13 @@ export default function AssistantPage() {
                       Fraud Probability
                     </p>
                     <p className="mt-2 text-2xl font-semibold text-white">
-                      {assessmentStatus === "VERIFIED" && fraudResult
+                      {verificationStatus === "COMPLETED" && fraudResult
                         ? `${(fraudResult.probability * 100).toFixed(2)}%`
                         : "N/A"}
                     </p>
                   </div>
                 </div>
-                {assessmentStatus === "PRELIMINARY" && (
+                {verificationStatus !== "COMPLETED" && (
                   <div className="mt-6 grid gap-3 sm:grid-cols-[1fr_200px]">
                     <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-muted">
                       <input
@@ -614,7 +622,9 @@ export default function AssistantPage() {
                   {[
                     { key: "overview", label: "Overview" },
                     { key: "explainability", label: "Explainability" },
-                    { key: "fraud", label: "Fraud Analysis" },
+                    ...(verificationStatus === "COMPLETED"
+                      ? [{ key: "fraud", label: "Fraud Analysis" }]
+                      : []),
                     { key: "history", label: "History" },
                   ].map((tab) => (
                     <button
