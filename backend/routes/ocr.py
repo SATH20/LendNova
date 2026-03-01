@@ -4,6 +4,7 @@ from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from services.ocr_service import extract_text_from_image
 from services.identity_verification import verify_identity
+from services.verification_engine import verification_router, get_final_values
 from database.models import Document, Assessment, db
 from database.schemas import AssessmentInputSchema, AssessmentOutputSchema
 from utils.helpers import mask_text
@@ -63,10 +64,13 @@ def ocr_extract():
 
     assessment_payload = None
     verification_result = None
+    underwriting_result = None
 
     has_income = extracted_data.get("income") is not None
     has_name = bool((extracted_data.get("name") or "").strip())
     has_structured = has_income or has_name
+    
+    document_type = request.form.get("document_type", "unknown")
 
     if assessment_id is not None:
         assessment = Assessment.query.get(assessment_id)
@@ -86,30 +90,86 @@ def ocr_extract():
                 if has_structured:
                     loaded_form = input_schema.load(form_data)
                     verification_form = {**loaded_form, **identity_data}
+                    
+                    # Run identity verification
                     verification_result = verify_identity(verification_form, extracted_data, file_path)
+                    
+                    # Run underwriting verification based on document type
+                    ocr_payslip = None
+                    ocr_bank = None
+                    
+                    if document_type == "payslip":
+                        ocr_payslip = extracted_data
+                    elif document_type == "bank_statement":
+                        ocr_bank = extracted_data
+                    else:
+                        # Default: treat as payslip if has income
+                        ocr_payslip = extracted_data if has_income else None
+                    
+                    # Run verification router
+                    underwriting_result = verification_router(
+                        assessment_data=verification_form,
+                        ocr_data_payslip=ocr_payslip,
+                        ocr_data_bank=ocr_bank,
+                        file_path_payslip=file_path if document_type == "payslip" else None
+                    )
+                    
+                    # Update assessment with verification results
                     assessment.fraud_probability = verification_result.get("fraud_probability")
-                    assessment.trust_score = verification_result.get("trust_score")
+                    assessment.trust_score = underwriting_result.get("trust_score", verification_result.get("trust_score"))
                     assessment.identity_status = verification_result.get("identity_status")
                     assessment.verification_reasons = json.dumps(
                         verification_result.get("verification_reasons", [])
                     )
+                    assessment.verification_flags = json.dumps(
+                        underwriting_result.get("verification_flags", [])
+                    )
                     assessment.identity_hash = verification_result.get("identity_hash")
-                    assessment.assessment_status = "VERIFIED"
-                    assessment.verification_status = "COMPLETED"
-                    document.fraud_flags = json.dumps(verification_result.get("verification_reasons", []))
+                    
+                    # Update with underwriting data
+                    assessment.verified_income = underwriting_result.get("verified_income")
+                    assessment.verified_expense = underwriting_result.get("verified_expense")
+                    assessment.verification_method = underwriting_result.get("verification_method")
+                    assessment.income_stability_score = underwriting_result.get("income_stability_score")
+                    assessment.expense_pattern_score = underwriting_result.get("expense_pattern_score")
+                    assessment.assessment_stage = underwriting_result.get("assessment_stage", "PRELIMINARY")
+                    assessment.verification_status = underwriting_result.get("verification_status", "PENDING")
+                    
+                    # Set assessment status based on verification
+                    if underwriting_result.get("verification_status") == "VERIFIED":
+                        assessment.assessment_status = "VERIFIED"
+                    elif underwriting_result.get("verification_status") == "PARTIAL":
+                        assessment.assessment_status = "PARTIAL"
+                    else:
+                        assessment.assessment_status = "PRELIMINARY"
+                    
+                    document.fraud_flags = json.dumps(
+                        verification_result.get("verification_reasons", []) + 
+                        underwriting_result.get("verification_flags", [])
+                    )
                 else:
                     assessment.fraud_probability = None
                     assessment.trust_score = None
                     assessment.identity_status = None
                     assessment.verification_reasons = json.dumps([])
+                    assessment.verification_flags = json.dumps([])
                     assessment.assessment_status = "PRELIMINARY"
+                    assessment.assessment_stage = "PRELIMINARY"
                     assessment.verification_status = "PENDING"
                     document.fraud_flags = ""
                 db.session.commit()
                 assessment_payload = output_schema.dump(assessment)
                 if verification_result:
                     assessment_payload["fraud_flags"] = verification_result.get("verification_reasons", [])
-            except Exception:
+                if underwriting_result:
+                    assessment_payload["verification_flags"] = underwriting_result.get("verification_flags", [])
+                    assessment_payload["verified_income"] = underwriting_result.get("verified_income")
+                    assessment_payload["verified_expense"] = underwriting_result.get("verified_expense")
+                    assessment_payload["verification_method"] = underwriting_result.get("verification_method")
+                    assessment_payload["income_stability_score"] = underwriting_result.get("income_stability_score")
+                    assessment_payload["expense_pattern_score"] = underwriting_result.get("expense_pattern_score")
+            except Exception as e:
+                print(f"Verification error: {str(e)}")
                 db.session.rollback()
 
     response = {
@@ -128,5 +188,14 @@ def ocr_extract():
         response["trust_score"] = verification_result.get("trust_score")
         response["identity_status"] = verification_result.get("identity_status")
         response["verification_reasons"] = verification_result.get("verification_reasons", [])
+    if underwriting_result:
+        response["verification_flags"] = underwriting_result.get("verification_flags", [])
+        response["verified_income"] = underwriting_result.get("verified_income")
+        response["verified_expense"] = underwriting_result.get("verified_expense")
+        response["verification_method"] = underwriting_result.get("verification_method")
+        response["verification_status"] = underwriting_result.get("verification_status")
+        response["assessment_stage"] = underwriting_result.get("assessment_stage")
+        response["income_stability_score"] = underwriting_result.get("income_stability_score")
+        response["expense_pattern_score"] = underwriting_result.get("expense_pattern_score")
 
     return jsonify(response), 200
