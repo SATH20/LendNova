@@ -117,8 +117,11 @@ export default function AssistantPage() {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ocrResult, setOcrResult] = useState<OcrResponse | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [assessmentId, setAssessmentId] = useState<number | null>(null);
+  const [payslipFile, setPayslipFile] = useState<File | null>(null);
+  const [bankStatementFile, setBankStatementFile] = useState<File | null>(null);
+  const [payslipUploaded, setPayslipUploaded] = useState(false);
+  const [bankStatementUploaded, setBankStatementUploaded] = useState(false);
   const [assessmentStatus, setAssessmentStatus] = useState<"PRELIMINARY" | "VERIFIED" | "PARTIAL">(
     "PRELIMINARY"
   );
@@ -239,45 +242,6 @@ export default function AssistantPage() {
     ]);
   };
 
-  const runOcrVerification = async (assessmentInput: AssessmentInput) => {
-    if (!selectedFile) {
-      throw new Error("Upload a document before running OCR.");
-    }
-    setActiveStep(2);
-    addFeed("OCR extraction running on uploaded documents.");
-    const ocr = await uploadDocument(
-      selectedFile,
-      "payslip",
-      assessmentId ?? undefined,
-      {
-        ...assessmentInput,
-        name: formData.name,
-        employer: formData.employer,
-        mobile: formData.mobile,
-      }
-    );
-    setOcrResult(ocr);
-    addFeed("OCR extraction completed.");
-    if (ocr.assessment) {
-      const verifiedRisk = mapPredictResponse(ocr.assessment);
-      setRiskResult(verifiedRisk);
-      setAssessmentStatus(verifiedRisk.assessmentStatus);
-      setVerificationStatus(verifiedRisk.verificationStatus);
-    }
-    if (ocr.fraud_probability !== undefined) {
-      setFraudResult({
-        probability: ocr.fraud_probability ?? 0,
-        flags: ocr.fraud_flags?.length ? ocr.fraud_flags : ["No anomalies detected"],
-        fields: {
-          name: ocr.name ?? "Unavailable",
-          idNumber: ocr.document_id ? `DOC-${ocr.document_id}` : "N/A",
-          employer: ocr.employer ?? "Unavailable",
-          income: ocr.income ? `$${Math.round(ocr.income).toLocaleString()}` : "Unavailable",
-        },
-      });
-    }
-    return ocr;
-  };
 
   const handleAssessment = async () => {
     const assessmentInput = buildAssessmentInput();
@@ -349,41 +313,166 @@ export default function AssistantPage() {
     }
   };
 
-  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>, documentType: "payslip" | "bank_statement") => {
     const file = event.target.files?.[0];
     if (!file) {
-      setSelectedFile(null);
-      setOcrResult(null);
-      setFraudResult(null);
-      setAssessmentStatus("PRELIMINARY");
-      setVerificationStatus("PENDING");
+      if (documentType === "payslip") {
+        setPayslipFile(null);
+      } else {
+        setBankStatementFile(null);
+      }
       return;
     }
     const allowed = ["image/png", "image/jpeg", "application/pdf"];
     if (!allowed.includes(file.type)) {
       setErrorMessage("Unsupported file type. Upload PNG, JPG, or PDF.");
-      setSelectedFile(null);
       return;
     }
     setErrorMessage(null);
-    setSelectedFile(file);
-    setOcrResult(null);
-    setFraudResult(null);
+    if (documentType === "payslip") {
+      setPayslipFile(file);
+    } else {
+      setBankStatementFile(file);
+    }
+  };
+
+  const getDocumentRequirements = () => {
+    const empType = formData.employmentType.toLowerCase();
+    if (empType === "full-time" || empType === "fulltime") {
+      return {
+        payslip: { required: true, label: "Payslip" },
+        bankStatement: { required: true, label: "Bank Statement" },
+      };
+    } else if (empType === "self-employed" || empType === "selfemployed") {
+      return {
+        payslip: { required: false, label: "Payslip" },
+        bankStatement: { required: true, label: "Bank Statement" },
+      };
+    } else if (empType === "part-time" || empType === "parttime") {
+      return {
+        payslip: { required: false, label: "Payslip" },
+        bankStatement: { required: true, label: "Bank Statement" },
+      };
+    } else if (empType === "student") {
+      return {
+        payslip: { required: false, label: "Payslip" },
+        bankStatement: { required: false, label: "Bank Statement" },
+      };
+    } else if (empType === "unemployed") {
+      return {
+        payslip: { required: false, label: "Payslip" },
+        bankStatement: { required: false, label: "Bank Statement" },
+      };
+    }
+    return {
+      payslip: { required: false, label: "Payslip" },
+      bankStatement: { required: false, label: "Bank Statement" },
+    };
   };
 
   const handleVerify = async () => {
-    if (!selectedFile) {
-      setErrorMessage("Upload a document to verify.");
+    const requirements = getDocumentRequirements();
+    
+    if (requirements.payslip.required && !payslipFile && !payslipUploaded) {
+      setErrorMessage("Payslip is required for full-time employment verification.");
       return;
     }
+    if (requirements.bankStatement.required && !bankStatementFile && !bankStatementUploaded) {
+      setErrorMessage("Bank statement is required for this employment type.");
+      return;
+    }
+    
+    if (!payslipFile && !bankStatementFile) {
+      setErrorMessage("Upload at least one document to verify.");
+      return;
+    }
+    
     const assessmentInput = buildAssessmentInput();
     setLoading(true);
     setMode("processing");
     setErrorMessage(null);
     setActiveStep(2);
     addFeed("Verification workflow started with uploaded documents.");
+    
     try {
-      await runOcrVerification(assessmentInput);
+      // Upload payslip first if available
+      if (payslipFile && !payslipUploaded) {
+        addFeed("Uploading and processing payslip...");
+        const ocrPayslip = await uploadDocument(
+          payslipFile,
+          "payslip",
+          assessmentId ?? undefined,
+          {
+            ...assessmentInput,
+            name: formData.name,
+            employer: formData.employer,
+            mobile: formData.mobile,
+          }
+        );
+        setOcrResult(ocrPayslip);
+        setPayslipUploaded(true);
+        addFeed("Payslip processed successfully.");
+        
+        if (ocrPayslip.assessment) {
+          const verifiedRisk = mapPredictResponse(ocrPayslip.assessment);
+          setRiskResult(verifiedRisk);
+          setAssessmentStatus(verifiedRisk.assessmentStatus);
+          setVerificationStatus(verifiedRisk.verificationStatus);
+        }
+        
+        if (ocrPayslip.fraud_probability !== undefined) {
+          setFraudResult({
+            probability: ocrPayslip.fraud_probability ?? 0,
+            flags: ocrPayslip.fraud_flags?.length ? ocrPayslip.fraud_flags : ["No anomalies detected"],
+            fields: {
+              name: ocrPayslip.name ?? "Unavailable",
+              idNumber: ocrPayslip.document_id ? `DOC-${ocrPayslip.document_id}` : "N/A",
+              employer: ocrPayslip.employer ?? "Unavailable",
+              income: ocrPayslip.income ? `${Math.round(ocrPayslip.income).toLocaleString()}` : "Unavailable",
+            },
+          });
+        }
+      }
+      
+      // Upload bank statement if available
+      if (bankStatementFile && !bankStatementUploaded) {
+        addFeed("Uploading and processing bank statement...");
+        const ocrBank = await uploadDocument(
+          bankStatementFile,
+          "bank_statement",
+          assessmentId ?? undefined,
+          {
+            ...assessmentInput,
+            name: formData.name,
+            employer: formData.employer,
+            mobile: formData.mobile,
+          }
+        );
+        setBankStatementUploaded(true);
+        addFeed("Bank statement processed successfully.");
+        
+        if (ocrBank.assessment) {
+          const verifiedRisk = mapPredictResponse(ocrBank.assessment);
+          setRiskResult(verifiedRisk);
+          setAssessmentStatus(verifiedRisk.assessmentStatus);
+          setVerificationStatus(verifiedRisk.verificationStatus);
+        }
+        
+        // Update fraud result if not already set
+        if (!fraudResult && ocrBank.fraud_probability !== undefined) {
+          setFraudResult({
+            probability: ocrBank.fraud_probability ?? 0,
+            flags: ocrBank.fraud_flags?.length ? ocrBank.fraud_flags : ["No anomalies detected"],
+            fields: {
+              name: ocrBank.name ?? "Unavailable",
+              idNumber: ocrBank.document_id ? `DOC-${ocrBank.document_id}` : "N/A",
+              employer: ocrBank.employer ?? "Unavailable",
+              income: ocrBank.income ? `${Math.round(ocrBank.income).toLocaleString()}` : "Unavailable",
+            },
+          });
+        }
+      }
+      
       setActiveStep(4);
       addFeed("Verification completed and assessment updated.");
       setMode("results");
@@ -559,17 +648,100 @@ export default function AssistantPage() {
                 </div>
                 <div>
                   <label className="text-xs uppercase tracking-[0.25em] text-muted">
-                    Optional Document Upload
+                    Document Requirements
                   </label>
-                  <label className="mt-3 flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-muted">
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,application/pdf"
-                      onChange={handleFileChange}
-                      className="text-xs text-white file:mr-3 file:rounded-full file:border-0 file:bg-white/10 file:px-3 file:py-1 file:text-xs file:text-white"
-                    />
-                    {selectedFile ? selectedFile.name : "Attach payslip or ID"}
-                  </label>
+                  <div className="mt-3 space-y-3">
+                    {(() => {
+                      const requirements = getDocumentRequirements();
+                      return (
+                        <>
+                          {requirements.payslip.required || !requirements.bankStatement.required ? (
+                            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-semibold text-white">
+                                    {requirements.payslip.label}
+                                  </span>
+                                  {requirements.payslip.required && (
+                                    <span className="rounded-full bg-[#FF5C5C]/20 px-2 py-0.5 text-[10px] font-semibold text-[#FF5C5C]">
+                                      Required
+                                    </span>
+                                  )}
+                                  {!requirements.payslip.required && (
+                                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-muted">
+                                      Optional
+                                    </span>
+                                  )}
+                                </div>
+                                {payslipFile && (
+                                  <span className="text-xs text-[#2EE59D]">✓ Selected</span>
+                                )}
+                              </div>
+                              <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-muted transition hover:border-white/20">
+                                <input
+                                  type="file"
+                                  accept="image/png,image/jpeg,application/pdf"
+                                  onChange={(e) => handleFileChange(e, "payslip")}
+                                  className="hidden"
+                                />
+                                <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-semibold text-white">
+                                  Choose File
+                                </span>
+                                <span className="flex-1 truncate">
+                                  {payslipFile ? payslipFile.name : "Upload payslip (PNG, JPG, PDF)"}
+                                </span>
+                              </label>
+                            </div>
+                          ) : null}
+                          
+                          {requirements.bankStatement.required || formData.employmentType !== "Full-time" ? (
+                            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-semibold text-white">
+                                    {requirements.bankStatement.label}
+                                  </span>
+                                  {requirements.bankStatement.required && (
+                                    <span className="rounded-full bg-[#FF5C5C]/20 px-2 py-0.5 text-[10px] font-semibold text-[#FF5C5C]">
+                                      Required
+                                    </span>
+                                  )}
+                                  {!requirements.bankStatement.required && (
+                                    <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-muted">
+                                      Optional
+                                    </span>
+                                  )}
+                                </div>
+                                {bankStatementFile && (
+                                  <span className="text-xs text-[#2EE59D]">✓ Selected</span>
+                                )}
+                              </div>
+                              <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-muted transition hover:border-white/20">
+                                <input
+                                  type="file"
+                                  accept="image/png,image/jpeg,application/pdf"
+                                  onChange={(e) => handleFileChange(e, "bank_statement")}
+                                  className="hidden"
+                                />
+                                <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-semibold text-white">
+                                  Choose File
+                                </span>
+                                <span className="flex-1 truncate">
+                                  {bankStatementFile ? bankStatementFile.name : "Upload bank statement (PNG, JPG, PDF)"}
+                                </span>
+                              </label>
+                            </div>
+                          ) : null}
+                          
+                          {!requirements.payslip.required && !requirements.bankStatement.required && (
+                            <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-muted">
+                              Documents are optional for {formData.employmentType} employment type.
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
               </div>
               {errorMessage && (
@@ -756,23 +928,112 @@ export default function AssistantPage() {
                   )}
                 </div>
                 {!["COMPLETED", "VERIFIED"].includes(verificationStatus) && (
-                  <div className="mt-6 grid gap-3 sm:grid-cols-[1fr_200px]">
-                    <label className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-muted">
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,application/pdf"
-                        onChange={handleFileChange}
-                        className="text-xs text-white file:mr-3 file:rounded-full file:border-0 file:bg-white/10 file:px-3 file:py-1 file:text-xs file:text-white"
-                      />
-                      {selectedFile ? selectedFile.name : "Upload documents to verify"}
-                    </label>
-                    <button
-                      onClick={handleVerify}
-                      disabled={loading || !selectedFile}
-                      className="ripple rounded-2xl bg-gradient-to-r from-[#4F7FFF] to-[#9B6BFF] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-[#4F7FFF]/30 transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#4F7FFF]/60"
-                    >
-                      Upload Documents to Verify
-                    </button>
+                  <div className="mt-6">
+                    <p className="text-xs uppercase tracking-[0.25em] text-muted">
+                      Complete Verification
+                    </p>
+                    <div className="mt-3 space-y-3">
+                      {(() => {
+                        const requirements = getDocumentRequirements();
+                        return (
+                          <>
+                            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                              <p className="text-xs font-semibold text-white">Verification Checklist</p>
+                              <div className="mt-3 space-y-2">
+                                {requirements.payslip.required && (
+                                  <div className="flex items-center gap-2 text-xs">
+                                    <span className={payslipUploaded ? "text-[#2EE59D]" : "text-muted"}>
+                                      {payslipUploaded ? "✔" : "○"}
+                                    </span>
+                                    <span className={payslipUploaded ? "text-white" : "text-muted"}>
+                                      Payslip {payslipUploaded ? "Uploaded" : "Required"}
+                                    </span>
+                                  </div>
+                                )}
+                                {requirements.bankStatement.required && (
+                                  <div className="flex items-center gap-2 text-xs">
+                                    <span className={bankStatementUploaded ? "text-[#2EE59D]" : "text-muted"}>
+                                      {bankStatementUploaded ? "✔" : "○"}
+                                    </span>
+                                    <span className={bankStatementUploaded ? "text-white" : "text-muted"}>
+                                      Bank Statement {bankStatementUploaded ? "Uploaded" : "Required"}
+                                    </span>
+                                  </div>
+                                )}
+                                {!requirements.payslip.required && !requirements.bankStatement.required && (
+                                  <div className="flex items-center gap-2 text-xs text-muted">
+                                    <span>○</span>
+                                    <span>Documents optional for this employment type</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            
+                            {requirements.payslip.required && !payslipUploaded && (
+                              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-semibold text-white">Upload Payslip</span>
+                                  {payslipFile && <span className="text-xs text-[#2EE59D]">✓ Selected</span>}
+                                </div>
+                                <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-muted transition hover:border-white/20">
+                                  <input
+                                    type="file"
+                                    accept="image/png,image/jpeg,application/pdf"
+                                    onChange={(e) => handleFileChange(e, "payslip")}
+                                    className="hidden"
+                                  />
+                                  <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-semibold text-white">
+                                    Choose File
+                                  </span>
+                                  <span className="flex-1 truncate">
+                                    {payslipFile ? payslipFile.name : "Select payslip document"}
+                                  </span>
+                                </label>
+                              </div>
+                            )}
+                            
+                            {requirements.bankStatement.required && !bankStatementUploaded && (
+                              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-semibold text-white">Upload Bank Statement</span>
+                                  {bankStatementFile && <span className="text-xs text-[#2EE59D]">✓ Selected</span>}
+                                </div>
+                                <label className="mt-3 flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-muted transition hover:border-white/20">
+                                  <input
+                                    type="file"
+                                    accept="image/png,image/jpeg,application/pdf"
+                                    onChange={(e) => handleFileChange(e, "bank_statement")}
+                                    className="hidden"
+                                  />
+                                  <span className="rounded-full bg-white/10 px-3 py-1 text-[10px] font-semibold text-white">
+                                    Choose File
+                                  </span>
+                                  <span className="flex-1 truncate">
+                                    {bankStatementFile ? bankStatementFile.name : "Select bank statement document"}
+                                  </span>
+                                </label>
+                              </div>
+                            )}
+                            
+                            {(!requirements.payslip.required || payslipUploaded) && 
+                             (!requirements.bankStatement.required || bankStatementUploaded) &&
+                             (requirements.payslip.required || requirements.bankStatement.required) && (
+                              <div className="rounded-2xl border border-[#2EE59D]/30 bg-[#2EE59D]/10 p-4 text-xs text-[#2EE59D]">
+                                ✓ All required documents uploaded. Verification complete.
+                              </div>
+                            )}
+                            
+                            <button
+                              onClick={handleVerify}
+                              disabled={loading || (!payslipFile && !bankStatementFile)}
+                              className="ripple w-full rounded-2xl bg-gradient-to-r from-[#4F7FFF] to-[#9B6BFF] px-4 py-3 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-[#4F7FFF]/30 transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#4F7FFF]/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {loading ? "Processing..." : "Upload & Verify Documents"}
+                            </button>
+                          </>
+                        );
+                      })()}
+                    </div>
                   </div>
                 )}
               </motion.div>
