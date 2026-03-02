@@ -1018,8 +1018,22 @@ export default function AssistantPage() {
                             {(!requirements.payslip.required || payslipUploaded) && 
                              (!requirements.bankStatement.required || bankStatementUploaded) &&
                              (requirements.payslip.required || requirements.bankStatement.required) && (
-                              <div className="rounded-2xl border border-[#2EE59D]/30 bg-[#2EE59D]/10 p-4 text-xs text-[#2EE59D]">
-                                ✓ All required documents uploaded. Verification complete.
+                              <div className={`rounded-2xl border p-4 text-xs ${
+                                verificationStatus === "VERIFIED" || verificationStatus === "COMPLETED"
+                                  ? "border-[#2EE59D]/30 bg-[#2EE59D]/10 text-[#2EE59D]"
+                                  : verificationStatus === "PARTIAL"
+                                  ? "border-[#9B6BFF]/30 bg-[#9B6BFF]/10 text-[#9B6BFF]"
+                                  : verificationStatus === "INCOMPLETE"
+                                  ? "border-[#FF5C5C]/30 bg-[#FF5C5C]/10 text-[#FF5C5C]"
+                                  : "border-[#2EE59D]/30 bg-[#2EE59D]/10 text-[#2EE59D]"
+                              }`}>
+                                {verificationStatus === "VERIFIED" || verificationStatus === "COMPLETED"
+                                  ? "✓ All required documents uploaded. Verification complete."
+                                  : verificationStatus === "PARTIAL"
+                                  ? "⚠ Documents uploaded. Financial mismatch detected. Additional review required."
+                                  : verificationStatus === "INCOMPLETE"
+                                  ? "⚠ Documents uploaded. Required documents missing. Upload additional documents."
+                                  : "✓ All required documents uploaded. Processing verification..."}
                               </div>
                             )}
                             

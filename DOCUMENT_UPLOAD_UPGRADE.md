@@ -60,7 +60,11 @@ Employment Type Requirements:
   - ✔ for uploaded documents
   - ○ for pending documents
 - Displays separate upload fields for missing documents
-- Shows success message when all required documents are uploaded
+- Shows dynamic status message based on verification result:
+  - **VERIFIED/COMPLETED**: "✓ All required documents uploaded. Verification complete." (green)
+  - **PARTIAL**: "⚠ Documents uploaded. Financial mismatch detected. Additional review required." (purple)
+  - **INCOMPLETE**: "⚠ Documents uploaded. Required documents missing. Upload additional documents." (red)
+  - **PENDING**: "✓ All required documents uploaded. Processing verification..." (green)
 - Upload button disabled until at least one document is selected
 
 ## Backend Integration
