@@ -1,36 +1,151 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# LendNova
 
-## Getting Started
+An AI credit assessment platform that actually explains its decisions.
 
-First, run the development server:
+## What's this about?
 
+Ever applied for a loan and got rejected with zero explanation? Yeah, that sucks. LendNova is my attempt at fixing that. It's a credit scoring system that uses machine learning to evaluate loan applications, but here's the kicker - it tells you exactly why it made each decision.
+
+I built this because traditional credit scoring feels like a black box. You throw your data in, and some mysterious algorithm spits out a number. Not cool. With LendNova, you get to see which factors helped your score and which ones hurt it.
+
+## What it does
+
+- Analyzes your income, expenses, and employment info
+- Reads documents like payslips and bank statements (OCR magic)
+- Checks for fraud patterns
+- Gives you a credit score with actual reasoning
+- Shows you the top 3 things working for you and the top 3 things working against you
+
+The whole thing runs in about 2 seconds, which is pretty neat.
+
+## Tech stuff
+
+**Frontend:** Next.js, React, TypeScript, Tailwind  
+**Backend:** Flask, Python  
+**ML:** scikit-learn, SHAP for explainability  
+**OCR:** Tesseract  
+**Database:** SQLite (easy to swap for Postgres)
+
+Nothing too fancy, just solid tools that work.
+
+## Getting it running
+
+You'll need Python 3.11+ and Node.js 20+. Also install Tesseract if you want the document scanning to work.
+
+**Backend:**
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd backend
+pip install -r requirements.txt
+python app.py
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**Frontend:**
+```bash
+npm install
+npm run dev
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Backend runs on port 5000, frontend on 3000. Open localhost:3000 and you're good to go.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## How to use it
 
-## Learn More
+The main endpoint is `/api/analyze`. Send it some data:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+curl -X POST http://localhost:5000/api/analyze \
+  -F "income=5000" \
+  -F "expenses=2000" \
+  -F "employment_type=Full-time" \
+  -F "job_tenure=3.5"
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+You'll get back something like:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```json
+{
+  "credit_score": 720,
+  "risk_band": "Low",
+  "decision": "APPROVED",
+  "explainability": {
+    "positive_factors": [
+      {"feature": "High income", "impact": 0.35},
+      {"feature": "Stable employment", "impact": 0.28}
+    ],
+    "risk_factors": []
+  }
+}
+```
 
-## Deploy on Vercel
+Pretty straightforward.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## How it actually works
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. **Document processing** - If you upload a payslip or bank statement, it extracts the text and pulls out relevant info
+2. **Verification** - Checks if what you said matches what's in the documents
+3. **Fraud detection** - Looks for weird patterns using an Isolation Forest model
+4. **ML prediction** - A trained model gives an initial probability
+5. **Decision logic** - Applies business rules and penalties to get the final score
+6. **Explanation** - SHAP breaks down which features mattered most
+
+Different employment types get different treatment. If you're salaried, we expect a payslip. Self-employed? Just the bank statement is fine. Students get more lenient requirements.
+
+## Project structure
+
+```
+backend/
+  routes/analyze.py          # main API endpoint
+  services/
+    verification_engine.py   # handles different employment types
+    fraud_engine.py          # anomaly detection
+    decision_orchestrator.py # final scoring logic
+  explainability/
+    shap_explainer.py        # makes decisions interpretable
+  ml/
+    train.py                 # model training script
+
+src/
+  app/page.tsx               # main dashboard
+  components/                # UI components
+```
+
+## Testing
+
+```bash
+cd backend
+python test_analyze_simple.py
+```
+
+Should see all tests pass. If not, something's broken.
+
+## Things to know
+
+- The ML model is trained on synthetic data (for now)
+- OCR works best with clear, high-res scans
+- All sensitive data gets masked before storage
+- The system is deterministic - same input always gives same output
+
+## Stuff I want to add
+
+- Support for more document types
+- Better mobile experience
+- Multi-language support
+- Integration with actual credit bureaus
+- Real-time model updates
+
+## Why I built this
+
+Started as a university project, turned into something I actually think could be useful. The financial industry needs more transparency, especially in lending. If this helps even a few people understand why they got rejected (and what to fix), that's a win.
+
+## Contributing
+
+Found a bug? Have an idea? Open an issue or send a PR. I'm pretty responsive.
+
+## License
+
+MIT - do whatever you want with it.
+
+---
+
+Built by someone who thinks credit scoring should be less mysterious.
+
+If this helped you, star it. If it didn't, tell me why.
