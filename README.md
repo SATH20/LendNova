@@ -80,14 +80,85 @@ Pretty straightforward.
 
 ## How it actually works
 
-1. **Document processing** - If you upload a payslip or bank statement, it extracts the text and pulls out relevant info
-2. **Verification** - Checks if what you said matches what's in the documents
-3. **Fraud detection** - Looks for weird patterns using an Isolation Forest model
-4. **ML prediction** - A trained model gives an initial probability
-5. **Decision logic** - Applies business rules and penalties to get the final score
-6. **Explanation** - SHAP breaks down which features mattered most
+Here's the flow when you submit an application:
+
+```
+Your Application
+      |
+      v
+┌─────────────────┐
+│  OCR Extraction │  → Reads your payslip/bank statement
+└────────┬────────┘
+         |
+         v
+┌─────────────────┐
+│  Verification   │  → Checks if your docs match what you said
+└────────┬────────┘
+         |
+         v
+┌─────────────────┐
+│ Fraud Detection │  → Looks for suspicious patterns
+└────────┬────────┘
+         |
+         v
+┌─────────────────┐
+│  ML Prediction  │  → Initial probability from trained model
+└────────┬────────┘
+         |
+         v
+┌─────────────────┐
+│ Decision Engine │  → Applies rules, calculates final score
+└────────┬────────┘
+         |
+         v
+┌─────────────────┐
+│  Explainability │  → SHAP tells you why
+└────────┬────────┘
+         |
+         v
+    Your Result
+```
 
 Different employment types get different treatment. If you're salaried, we expect a payslip. Self-employed? Just the bank statement is fine. Students get more lenient requirements.
+
+## Architecture
+
+The system has three main parts:
+
+```
+┌──────────────────────────────────────────────────┐
+│                   Frontend                       │
+│  Next.js dashboard where you interact with it    │
+└─────────────────┬────────────────────────────────┘
+                  |
+                  | HTTP requests
+                  v
+┌──────────────────────────────────────────────────┐
+│                Flask Backend                     │
+│                                                  │
+│  /api/analyze  ←  main endpoint                  │
+│  /api/predict  ←  just ML scoring                │
+│  /api/fraud    ←  just fraud check               │
+│                                                  │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│  │   OCR    │  │ Verifier │  │  Fraud   │      │
+│  │ Service  │  │  Engine  │  │  Engine  │      │
+│  └──────────┘  └──────────┘  └──────────┘      │
+│                                                  │
+│  ┌──────────┐  ┌──────────┐                     │
+│  │    ML    │  │   SHAP   │                     │
+│  │  Model   │  │Explainer │                     │
+│  └──────────┘  └──────────┘                     │
+└─────────────────┬────────────────────────────────┘
+                  |
+                  v
+┌──────────────────────────────────────────────────┐
+│              SQLite Database                     │
+│  Stores assessments, documents, history          │
+└──────────────────────────────────────────────────┘
+```
+
+Everything's modular. Each service does one thing and does it well. The decision orchestrator ties it all together.
 
 ## Project structure
 
