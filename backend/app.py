@@ -8,6 +8,7 @@ from routes.predict import predict_bp
 from routes.fraud import fraud_bp
 from routes.ocr import ocr_bp
 from routes.assessments import assessments_bp
+from routes.analyze import analyze_bp
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "ml"))
 
@@ -23,6 +24,7 @@ def create_app(config_class=Config):
     app.register_blueprint(fraud_bp, url_prefix="/api")
     app.register_blueprint(ocr_bp, url_prefix="/api")
     app.register_blueprint(assessments_bp, url_prefix="/api")
+    app.register_blueprint(analyze_bp, url_prefix="/api")
 
     @app.errorhandler(404)
     def not_found(error):
