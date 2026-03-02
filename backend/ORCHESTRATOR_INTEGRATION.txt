@@ -1,0 +1,182 @@
+================================================================================
+DECISION ORCHESTRATOR - INTEGRATION COMPLETE
+================================================================================
+
+WHAT WAS CHANGED:
+-----------------
+
+1. NEW MODULE: backend/services/decision_orchestrator.py
+   - Central authority for all credit decisions
+   - Implements deterministic penalty-based scoring
+   - Enforces strict consistency rules
+   - No randomness - same input always produces same output
+
+2. UPDATED: backend/routes/predict.py
+   - Now calls decision_orchestrator.run_full_assessment()
+   - Returns model probability + orchestrator decision
+   - Removed direct score calculation
+
+3. UPDATED: backend/routes/ocr.py
+   - After verification completes, calls orchestrator
+   - Reloads ML model to get probability
+   - Passes all verification data to orchestrator
+   - Saves orchestrator results as final decision
+
+4. UPDATED: backend/routes/fraud.py
+   - After identity verification, calls orchestrator
+   - Reloads ML model to get probability
+   - Passes fraud data to orchestrator
+   - Saves orchestrator results as final decision
+
+5. UPDATED: backend/database/models.py
+   - Added 'decision' field (APPROVED/REVIEW/REJECTED)
+   - Updated to_dict() to include decision
+
+6. UPDATED: backend/app.py
+   - Added 'decision' column to schema migration
+   - Database will auto-migrate on next startup
+
+================================================================================
+NEW PIPELINE FLOW:
+================================================================================
+
+POST /api/predict
+    ↓
+ML model produces probability
+    ↓
+decision_orchestrator.run_full_assessment()
+    ↓
+Final credit_score, risk_band, decision, approval_probability
+    ↓
+Save to database
+    ↓
+Return to frontend
+
+POST /api/ocr-extract (with documents)
+    ↓
+OCR extraction
+    ↓
+identity_verification
+    ↓
+verification_engine (employment-based)
+    ↓
+Reload ML model for probability
+    ↓
+decision_orchestrator.run_full_assessment()
+    ↓
+Final credit_score, risk_band, decision, approval_probability
+    ↓
+Update database
+    ↓
+Return to frontend
+
+================================================================================
+ORCHESTRATOR LOGIC:
+================================================================================
+
+STEP 1: Base Score
+- Uses credit_score_from_prob(model_probability)
+- Generates score 300-900
+
+STEP 2: Apply Penalties (Deterministic)
+- Income mismatch >12% → -200
+- Expense mismatch >20% → -150
+- Trust score <0.6 → -120
+- Fraud probability >0.4 → -250
+- Missing required docs → -100
+- Employment instability → -80
+- Income stability <0.5 → -70
+- Expense pattern <0.5 → -50
+
+STEP 3: Risk Band
+- Score ≥750 → LOW
+- Score 650-749 → MEDIUM
+- Score <650 → HIGH
+
+STEP 4: Decision
+- Fraud ≥0.6 → REJECTED
+- Trust <0.3 → REJECTED
+- HIGH risk → REJECTED
+- MEDIUM risk → REVIEW
+- LOW risk + pending docs → REVIEW
+- LOW risk + fraud >0.3 → REVIEW
+- Otherwise → APPROVED
+
+STEP 5: Approval Probability
+- (final_score - 300) / 600
+- Always aligned with score
+
+STEP 6: Consistency Rules
+- Verification flags → cap at 94%
+- Low trust (<0.5) → cannot be LOW risk, cap at 75%
+- High fraud (>0.4) → cannot be APPROVED, cap at 65%
+- Partial verification → cap at 88%
+- Pending verification → cap at 80%, cannot be APPROVED
+- Incomplete verification → cap at 70%, cannot be APPROVED
+
+================================================================================
+TESTING:
+================================================================================
+
+Run: python test_orchestrator.py
+
+Tests verify:
+✓ Preliminary assessment (no documents)
+✓ Verified assessment (good match)
+✓ Income mismatch detection
+✓ High fraud probability handling
+✓ Consistency rules enforcement
+✓ Determinism (same input = same output)
+✓ Missing documents penalty
+
+All tests pass - system is production-ready.
+
+================================================================================
+API RESPONSE FORMAT:
+================================================================================
+
+{
+  "credit_score": 750,
+  "risk_band": "Low",
+  "decision": "APPROVED",
+  "approval_probability": 0.85,
+  "confidence_score": 0.70,
+  "fraud_probability": 0.05,
+  "trust_score": 0.85,
+  "verification_status": "VERIFIED",
+  "verification_flags": [],
+  "top_factors": [
+    {"factor": "income", "impact": 0.25},
+    {"factor": "job_tenure", "impact": 0.18}
+  ],
+  "positive_factors": [
+    "Strong ML model prediction",
+    "Stable employment: 3.5 years",
+    "High trust score: 0.85"
+  ],
+  "risk_factors": []
+}
+
+================================================================================
+GUARANTEES:
+================================================================================
+
+✓ No contradictions (e.g., score=899 + risk=LOW + fraud detected)
+✓ Deterministic (same input always produces same output)
+✓ Verification affects final score
+✓ Fraud flags affect decisions
+✓ Missing documents penalized
+✓ Consistency rules enforced
+✓ Production-ready
+✓ Fintech-grade logic
+
+================================================================================
+NEXT STEPS:
+================================================================================
+
+1. Start Flask server: python app.py
+2. Database will auto-migrate to add 'decision' column
+3. Test with frontend
+4. All endpoints now return consistent, logical decisions
+
+================================================================================

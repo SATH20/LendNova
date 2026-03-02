@@ -26,6 +26,7 @@ class Assessment(db.Model):
     approval_probability = db.Column(db.Float, nullable=False)
     fraud_probability = db.Column(db.Float, nullable=True)
     risk_band = db.Column(db.String(20), nullable=False)
+    decision = db.Column(db.String(20), nullable=True)  # APPROVED, REVIEW, REJECTED
     model_used = db.Column(db.String(50), nullable=False)
     confidence_score = db.Column(db.Float, nullable=False)
     assessment_status = db.Column(db.String(20), nullable=False, default="PRELIMINARY")
@@ -52,6 +53,7 @@ class Assessment(db.Model):
             'approval_probability': self.approval_probability,
             'fraud_probability': self.fraud_probability,
             'risk_band': self.risk_band,
+            'decision': self.decision,
             'model_used': self.model_used,
             'assessment_status': self.assessment_status,
             'assessment_stage': self.assessment_stage,

@@ -1,10 +1,14 @@
 import os
 import json
+import joblib
+import pandas as pd
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from services.ocr_service import extract_text_from_image
 from services.identity_verification import verify_identity
 from services.verification_engine import verification_router, get_final_values
+from services.decision_orchestrator import run_full_assessment
+from services.explainability import explain_decision
 from database.models import Document, Assessment, db
 from database.schemas import AssessmentInputSchema, AssessmentOutputSchema
 from utils.helpers import mask_text
@@ -114,7 +118,70 @@ def ocr_extract():
                         file_path_payslip=file_path if document_type == "payslip" else None
                     )
                     
-                    # Update assessment with verification results
+                    # ⭐ RUN DECISION ORCHESTRATOR - Final authority on scoring
+                    # Load ML model to get original probability
+                    model_path = current_app.config["MODEL_PATH"]
+                    pipeline_path = current_app.config["PIPELINE_PATH"]
+                    stats_path = current_app.config["FEATURE_STATS_PATH"]
+                    
+                    model_probability = 0.5  # Default
+                    top_factors = []
+                    
+                    if os.path.exists(model_path) and os.path.exists(pipeline_path):
+                        try:
+                            model = joblib.load(model_path)
+                            preprocessor = joblib.load(pipeline_path)
+                            stats = joblib.load(stats_path) if os.path.exists(stats_path) else {}
+                            
+                            df = pd.DataFrame([verification_form])
+                            transformed = preprocessor.transform(df)
+                            if hasattr(transformed, "toarray"):
+                                transformed = transformed.toarray()
+                            
+                            model_probability = float(model.predict_proba(transformed)[0][1])
+                            
+                            # Get explainability
+                            feature_names = stats.get("feature_names")
+                            feature_means = stats.get("feature_means")
+                            if not feature_names:
+                                feature_names = preprocessor.named_steps["preprocess"].get_feature_names_out().tolist()
+                            
+                            top_factors = explain_decision(
+                                model,
+                                feature_names,
+                                transformed[0],
+                                feature_means,
+                                top_n=5,
+                            )
+                        except Exception as e:
+                            print(f"ML model error: {str(e)}")
+                    
+                    # Prepare orchestrator input
+                    orchestrator_input = {
+                        'model_probability': model_probability,
+                        'declared_income': verification_form.get('income', 0),
+                        'verified_income': underwriting_result.get('verified_income'),
+                        'declared_expense': verification_form.get('expenses', 0),
+                        'verified_expense': underwriting_result.get('verified_expense'),
+                        'verification_flags': underwriting_result.get('verification_flags', []),
+                        'trust_score': underwriting_result.get('trust_score', verification_result.get('trust_score')),
+                        'fraud_probability': verification_result.get('fraud_probability', 0),
+                        'income_stability_score': underwriting_result.get('income_stability_score'),
+                        'expense_pattern_score': underwriting_result.get('expense_pattern_score'),
+                        'employment_type': verification_form.get('employment_type', ''),
+                        'job_tenure': verification_form.get('job_tenure', 0),
+                        'verification_status': underwriting_result.get('verification_status', 'PENDING'),
+                    }
+                    
+                    # Get final decision from orchestrator
+                    decision_result = run_full_assessment(orchestrator_input)
+                    
+                    # Update assessment with ORCHESTRATOR results (final authority)
+                    assessment.credit_score = decision_result['credit_score']
+                    assessment.approval_probability = decision_result['approval_probability']
+                    assessment.risk_band = decision_result['risk_band']
+                    assessment.decision = decision_result['decision']
+                    assessment.confidence_score = decision_result['confidence_score']
                     assessment.fraud_probability = verification_result.get("fraud_probability")
                     assessment.trust_score = underwriting_result.get("trust_score", verification_result.get("trust_score"))
                     assessment.identity_status = verification_result.get("identity_status")
@@ -168,6 +235,11 @@ def ocr_extract():
                     assessment_payload["verification_method"] = underwriting_result.get("verification_method")
                     assessment_payload["income_stability_score"] = underwriting_result.get("income_stability_score")
                     assessment_payload["expense_pattern_score"] = underwriting_result.get("expense_pattern_score")
+                # Add orchestrator results
+                assessment_payload["decision"] = decision_result.get('decision', 'REVIEW')
+                assessment_payload["top_factors"] = top_factors
+                assessment_payload["positive_factors"] = decision_result.get('positive_factors', [])
+                assessment_payload["risk_factors"] = decision_result.get('risk_factors', [])
             except Exception as e:
                 print(f"Verification error: {str(e)}")
                 db.session.rollback()

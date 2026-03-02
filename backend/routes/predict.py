@@ -7,10 +7,8 @@ from marshmallow import ValidationError
 from database.schemas import AssessmentInputSchema, AssessmentOutputSchema
 from database.models import Assessment, db
 from services.explainability import explain_decision
+from services.decision_orchestrator import run_full_assessment
 from utils.helpers import (
-    credit_score_from_prob,
-    risk_band_from_score,
-    confidence_from_prob,
     mask_amount,
 )
 
@@ -40,9 +38,6 @@ def predict():
             transformed = transformed.toarray()
 
         prob = float(model.predict_proba(transformed)[0][1])
-        credit_score = credit_score_from_prob(prob)
-        risk_band = risk_band_from_score(credit_score)
-        confidence_score = confidence_from_prob(prob)
 
         feature_names = stats.get("feature_names")
         feature_means = stats.get("feature_means")
@@ -57,6 +52,25 @@ def predict():
             top_n=5,
         )
 
+        # Run through decision orchestrator for final scoring
+        orchestrator_input = {
+            'model_probability': prob,
+            'declared_income': mask_amount(data["income"]),
+            'verified_income': None,
+            'declared_expense': mask_amount(data["expenses"]),
+            'verified_expense': None,
+            'verification_flags': [],
+            'trust_score': None,
+            'fraud_probability': 0.0,
+            'income_stability_score': None,
+            'expense_pattern_score': None,
+            'employment_type': data["employment_type"],
+            'job_tenure': data["job_tenure"],
+            'verification_status': 'PENDING',
+        }
+        
+        decision_result = run_full_assessment(orchestrator_input)
+
         assessment = Assessment(
             income=mask_amount(data["income"]),
             expenses=mask_amount(data["expenses"]),
@@ -67,19 +81,20 @@ def predict():
             verified_income=None,
             verified_expense=None,
             verification_method=None,
-            credit_score=credit_score,
-            approval_probability=prob,
-            fraud_probability=None,
-            risk_band=risk_band,
+            credit_score=decision_result['credit_score'],
+            approval_probability=decision_result['approval_probability'],
+            fraud_probability=0.0,
+            risk_band=decision_result['risk_band'],
+            decision=decision_result['decision'],
             model_used=stats.get("model") or type(model).__name__,
-            confidence_score=confidence_score,
+            confidence_score=decision_result['confidence_score'],
             assessment_status="PRELIMINARY",
             assessment_stage="PRELIMINARY",
             verification_status="PENDING",
             trust_score=None,
             identity_status=None,
             verification_reasons=json.dumps([]),
-            verification_flags=json.dumps([]),
+            verification_flags=json.dumps(decision_result.get('penalties_applied', [])),
             income_stability_score=None,
             expense_pattern_score=None,
         )
@@ -89,13 +104,16 @@ def predict():
 
         result = output_schema.dump(assessment)
         result["top_factors"] = top_factors
-        result["fraud_probability"] = None
+        result["fraud_probability"] = 0.0
         result["fraud_flags"] = []
         result["assessment_status"] = "PRELIMINARY"
         result["verification_status"] = "PENDING"
         result["trust_score"] = None
         result["identity_status"] = None
         result["verification_reasons"] = []
+        result["decision"] = decision_result['decision']
+        result["positive_factors"] = decision_result.get('positive_factors', [])
+        result["risk_factors"] = decision_result.get('risk_factors', [])
 
         return jsonify(result), 200
 
