@@ -13,28 +13,28 @@ class DecisionOrchestrator:
     Implements deterministic penalty-based scoring with strict business rules.
     """
     
-    # Penalty constants (deterministic)
-    PENALTY_INCOME_MISMATCH = 200
-    PENALTY_EXPENSE_MISMATCH = 150
-    PENALTY_LOW_TRUST = 120
-    PENALTY_HIGH_FRAUD = 250
-    PENALTY_MISSING_DOCS = 100
-    PENALTY_EMPLOYMENT_INSTABILITY = 80
-    PENALTY_INCOME_INSTABILITY = 70
-    PENALTY_EXPENSE_PATTERN = 50
+    # Penalty constants (deterministic) - CALIBRATED FOR REALISTIC LENDING
+    PENALTY_INCOME_MISMATCH = 100  # Further reduced for moderate mismatches
+    PENALTY_EXPENSE_MISMATCH = 80
+    PENALTY_LOW_TRUST = 70
+    PENALTY_HIGH_FRAUD = 200
+    PENALTY_MISSING_DOCS = 60
+    PENALTY_EMPLOYMENT_INSTABILITY = 120  # Increased for unemployed inconsistency
+    PENALTY_INCOME_INSTABILITY = 50
+    PENALTY_EXPENSE_PATTERN = 40
     
     # Thresholds
-    INCOME_MISMATCH_THRESHOLD = 0.12
-    EXPENSE_MISMATCH_THRESHOLD = 0.20
-    TRUST_SCORE_THRESHOLD = 0.6
+    INCOME_MISMATCH_THRESHOLD = 0.15
+    EXPENSE_MISMATCH_THRESHOLD = 0.25
+    TRUST_SCORE_THRESHOLD = 0.55
     FRAUD_PROBABILITY_THRESHOLD = 0.4
     FRAUD_REJECTION_THRESHOLD = 0.6
     INCOME_STABILITY_THRESHOLD = 0.5
     EXPENSE_PATTERN_THRESHOLD = 0.5
     
-    # Risk bands
-    RISK_LOW_THRESHOLD = 750
-    RISK_MEDIUM_THRESHOLD = 650
+    # Risk bands - ADJUSTED FOR REALISTIC CREDIT SCORING
+    RISK_LOW_THRESHOLD = 700
+    RISK_MEDIUM_THRESHOLD = 550  # Further reduced to capture edge cases
     
     def __init__(self):
         pass
@@ -188,24 +188,31 @@ class DecisionOrchestrator:
     def _determine_decision(self, score, risk_band, fraud_probability, trust_score, verification_status):
         """
         Determines final lending decision based on score and risk factors.
+        UPDATED: More nuanced decision logic for Medium risk cases
         """
-        # Automatic rejection conditions
+        # Automatic rejection conditions (strict)
         if fraud_probability >= self.FRAUD_REJECTION_THRESHOLD:
             return "REJECTED"
         
         if trust_score is not None and trust_score < 0.3:
             return "REJECTED"
         
+        # High risk handling - more nuanced
         if risk_band == "High":
-            return "REJECTED"
-        
-        if risk_band == "Medium":
-            # Medium risk requires manual review
-            if fraud_probability > 0.3 or (trust_score is not None and trust_score < 0.5):
-                return "REVIEW"
+            # High risk with very high fraud or very low trust = reject
+            if fraud_probability > 0.5 or (trust_score is not None and trust_score < 0.35):
+                return "REJECTED"
+            # High risk with low trust (0.35-0.45) = reject
+            if trust_score is not None and trust_score < 0.45:
+                return "REJECTED"
+            # Otherwise, high risk goes to manual review
             return "REVIEW"
         
-        # Low risk
+        # Medium risk - always requires manual review
+        if risk_band == "Medium":
+            return "REVIEW"
+        
+        # Low risk - can be approved with conditions
         if verification_status in ['INCOMPLETE', 'PENDING']:
             return "REVIEW"
         
@@ -219,45 +226,52 @@ class DecisionOrchestrator:
                                    verification_status):
         """
         Enforces strict consistency rules to prevent contradictory outputs.
+        UPDATED: More balanced consistency enforcement
         """
         # Rule 1: If verification flags exist, cap approval probability
         if verification_flags and len(verification_flags) > 0:
-            approval_probability = min(approval_probability, 0.94)
+            approval_probability = min(approval_probability, 0.92)
         
-        # Rule 2: Low trust cannot be low risk
+        # Rule 2: Low trust reduces approval probability
         if trust_score is not None and trust_score < 0.5:
-            if risk_band == "Low":
+            if risk_band == "Low" and trust_score < 0.4:
                 risk_band = "Medium"
-            approval_probability = min(approval_probability, 0.75)
+            approval_probability = min(approval_probability, 0.80)
         
         # Rule 3: High fraud cannot be approved
         if fraud_probability > self.FRAUD_PROBABILITY_THRESHOLD:
             if decision == "APPROVED":
                 decision = "REVIEW"
-            approval_probability = min(approval_probability, 0.65)
+            approval_probability = min(approval_probability, 0.70)
         
-        # Rule 4: Partial verification cannot yield perfect score
+        # Rule 4: Partial verification caps approval
         if verification_status == "PARTIAL":
-            approval_probability = min(approval_probability, 0.88)
+            approval_probability = min(approval_probability, 0.85)
         
-        # Rule 5: Pending verification cannot be approved
+        # Rule 5: Pending verification caps approval
         if verification_status == "PENDING":
-            approval_probability = min(approval_probability, 0.80)
+            approval_probability = min(approval_probability, 0.75)
             if decision == "APPROVED":
                 decision = "REVIEW"
         
         # Rule 6: Incomplete verification for required docs
         if verification_status == "INCOMPLETE":
-            approval_probability = min(approval_probability, 0.70)
+            approval_probability = min(approval_probability, 0.65)
             if decision == "APPROVED":
                 decision = "REVIEW"
         
         # Rule 7: Decision must align with approval probability
-        if decision == "APPROVED" and approval_probability < 0.65:
+        if decision == "APPROVED" and approval_probability < 0.60:
             decision = "REVIEW"
         
-        if decision == "REJECTED" and approval_probability > 0.50:
-            approval_probability = min(approval_probability, 0.50)
+        if decision == "REJECTED" and approval_probability > 0.55:
+            approval_probability = min(approval_probability, 0.55)
+        
+        # Rule 8: Review decisions should have moderate approval probability
+        if decision == "REVIEW":
+            # Ensure review cases have reasonable approval range
+            if approval_probability > 0.90:
+                approval_probability = min(approval_probability, 0.85)
         
         return approval_probability, risk_band, decision
     
