@@ -57,3 +57,4 @@ next-env.d.ts
 # text files (except requirements.txt)
 *.txt
 !requirements.txt
+.env.example
