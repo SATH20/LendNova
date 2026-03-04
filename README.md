@@ -213,10 +213,20 @@ Found a bug? Have an idea? Open an issue or send a PR. I'm pretty responsive.
 
 ## License
 
-MIT - do whatever you want with it.
+MIT License - see [LICENSE](LICENSE) file for details.
+
+Copyright (c) 2026 Rajavarapu Sathwik
 
 ---
 
-Built by someone who thinks credit scoring should be less mysterious.
+## Author
 
-If this helped you, star it. If it didn't, tell me why.
+**Rajavarapu Sathwik**
+
+Connect with me:
+- Instagram: [@_sathwikkkk_](https://www.instagram.com/_sathwikkkk_?igsh=MWcyc3lwbWd0eWJkcQ==)
+- GitHub: [Your GitHub Profile]
+
+Built this because credit scoring should be less mysterious and more transparent.
+
+If this helped you, star it ⭐
