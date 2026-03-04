@@ -225,7 +225,7 @@ Copyright (c) 2026 Rajavarapu Sathwik
 
 Connect with me:
 - Instagram: [@_sathwikkkk_](https://www.instagram.com/_sathwikkkk_?igsh=MWcyc3lwbWd0eWJkcQ==)
-- GitHub: [Your GitHub Profile]
+- GitHub: [SATH20]
 
 Built this because credit scoring should be less mysterious and more transparent.
 
