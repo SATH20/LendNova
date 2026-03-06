@@ -119,7 +119,7 @@ Your Application
     Your Result
 ```
 
-Different employment types get different treatment. If you're salaried, we expect a payslip. Self-employed? Just the bank statement is fine. Students get more lenient requirements.
+Different employment types get different treatment. If you're salaried, we expect a payslip. Self-employed? Just the bank statement is fine. Students get more lenient requirements , go through the system once.
 
 ## Architecture
 
