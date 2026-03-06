@@ -413,14 +413,29 @@ export default function Home() {
         <footer className="glass rounded-3xl p-6 text-xs text-muted">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <p className="text-sm font-semibold text-white">LENDNOVA Research Lab</p>
+              <p className="text-sm font-semibold text-white">LENDNOVA</p>
               <p className="mt-2">
-                Ethical AI Lending Initiative • Verified Risk Intelligence Program
+                © 2026 Built by Rajavarapu Sathwik • Ethical AI Lending Initiative
               </p>
             </div>
-            <div className="space-y-1 text-right">
-              <p>Credit Risk Intelligence Division</p>
-              <p>Operational Readiness Brief • 2026</p>
+            <div className="flex items-center gap-4 text-right">
+              <a
+                href="https://www.instagram.com/_sathwikkkk_?igsh=MWcyc3lwbWd0eWJkcQ=="
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition hover:text-white"
+              >
+                Instagram
+              </a>
+              <span className="text-white/20">•</span>
+              <a
+                href="https://github.com/SATH20/LendNova"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="transition hover:text-white"
+              >
+                GitHub
+              </a>
             </div>
           </div>
         </footer>
