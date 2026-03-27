@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-import { animate, motion } from "framer-motion";
+import { useMemo } from "react";
+import { motion } from "framer-motion";
+import AnimatedValue from "./AnimatedValue";
 
 type Factor = {
   name: string;
@@ -23,32 +24,6 @@ type Props = {
   onCompare: () => void;
 };
 
-function AnimatedNumber({
-  value,
-  decimals = 0,
-  suffix = "",
-}: {
-  value: number;
-  decimals?: number;
-  suffix?: string;
-}) {
-  const ref = useRef<HTMLSpanElement>(null);
-
-  useEffect(() => {
-    const controls = animate(0, value, {
-      duration: 0.9,
-      onUpdate(latest) {
-        if (ref.current) {
-          ref.current.textContent = `${latest.toFixed(decimals)}${suffix}`;
-        }
-      },
-    });
-    return () => controls.stop();
-  }, [value, decimals, suffix]);
-
-  return <span ref={ref} />;
-}
-
 export default function RiskResultCard({ data, onExplain, onCompare }: Props) {
   const riskColor = useMemo(() => {
     if (data.riskBand === "Low") return "bg-[#2EE59D]/20 text-[#2EE59D]";
@@ -60,7 +35,7 @@ export default function RiskResultCard({ data, onExplain, onCompare }: Props) {
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
-      whileHover={{ y: -4, rotateX: 2, rotateY: -2 }}
+      whileHover={{ y: -4 }}
       transition={{ type: "spring", stiffness: 120, damping: 16 }}
       className="glass glow-border rounded-3xl p-6"
     >
@@ -70,7 +45,7 @@ export default function RiskResultCard({ data, onExplain, onCompare }: Props) {
             Credit Score
           </p>
           <p className="mt-3 text-4xl font-semibold text-white">
-            <AnimatedNumber value={data.score} />
+            <AnimatedValue value={data.score} />
           </p>
           <p className="mt-2 text-sm text-muted">Model: {data.model}</p>
         </div>
@@ -81,8 +56,8 @@ export default function RiskResultCard({ data, onExplain, onCompare }: Props) {
       <div className="mt-6">
         <div className="flex items-center justify-between text-xs text-muted">
           <span>Approval Probability</span>
-          <span className="text-white">
-            <AnimatedNumber value={data.approvalProbability * 100} decimals={1} suffix="%" />
+          <span className="text-white font-semibold">
+            {(data.approvalProbability * 100).toFixed(1)}%
           </span>
         </div>
         <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-white/10">
@@ -96,17 +71,13 @@ export default function RiskResultCard({ data, onExplain, onCompare }: Props) {
       </div>
       <div className="mt-6 grid gap-3 text-xs text-muted sm:grid-cols-2">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-          <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
-            Confidence
-          </p>
+          <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Confidence</p>
           <p className="mt-2 text-sm font-semibold text-white">
             {(data.confidence * 100).toFixed(1)}%
           </p>
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-          <p className="text-[10px] uppercase tracking-[0.25em] text-muted">
-            Top Factor
-          </p>
+          <p className="text-[10px] uppercase tracking-[0.25em] text-muted">Top Factor</p>
           <p className="mt-2 text-sm font-semibold text-white">
             {data.factors[0]?.name ?? "N/A"}
           </p>
@@ -114,19 +85,18 @@ export default function RiskResultCard({ data, onExplain, onCompare }: Props) {
       </div>
       <div className="mt-6 flex flex-wrap gap-3">
         <button
+          id="explain-btn"
           onClick={onExplain}
-          className="ripple rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:border-white/30 hover:bg-white/20 focus:outline-none focus:ring-2 focus:ring-[#4F7FFF]/60"
+          className="ripple rounded-full border border-white/10 bg-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:border-white/30 hover:bg-white/20"
         >
-          Explain
+          Why This Score
         </button>
         <button
+          id="eligibility-btn"
           onClick={onCompare}
-          className="ripple rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white transition hover:border-white/30 hover:bg-white/15 focus:outline-none focus:ring-2 focus:ring-[#4F7FFF]/60"
+          className="ripple rounded-full bg-gradient-to-r from-[#4F7FFF] to-[#9B6BFF] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-[#4F7FFF]/30 transition hover:brightness-110"
         >
-          Compare Models
-        </button>
-        <button className="ripple rounded-full bg-gradient-to-r from-[#4F7FFF] to-[#9B6BFF] px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-lg shadow-[#4F7FFF]/30 transition hover:brightness-110 focus:outline-none focus:ring-2 focus:ring-[#4F7FFF]/60">
-          Download Report
+          See Loan Eligibility
         </button>
       </div>
     </motion.div>
