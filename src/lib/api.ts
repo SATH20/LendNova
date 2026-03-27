@@ -5,6 +5,34 @@ export type AssessmentInput = {
   job_tenure: number;
 };
 
+export type LoanEligibility = {
+  eligible_loan_amount: number;
+  monthly_emi_estimate: number;
+  effective_income: number;
+  effective_expense: number;
+  disposable_income: number;
+  savings_ratio: number;
+  max_dti_ratio: number;
+  income_used: "verified" | "declared";
+  expense_used: "verified" | "declared";
+};
+
+export type ImprovementSuggestion = {
+  category: string;
+  priority: "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
+  message: string;
+  impact: string;
+  action_items: string[];
+};
+
+export type PotentialIncrease = {
+  description: string;
+  new_eligible_amount: number;
+  increase_amount: number;
+  new_monthly_expense?: number;
+  new_monthly_income?: number;
+};
+
 export type PredictResponse = {
   id?: number;
   credit_score: number;
@@ -29,6 +57,14 @@ export type PredictResponse = {
   income_stability_score?: number | null;
   expense_pattern_score?: number | null;
   top_factors: { factor: string; impact: number }[];
+  decision?: string;
+  positive_factors?: string[];
+  risk_factors?: string[];
+  // Loan eligibility
+  loan_eligibility?: LoanEligibility;
+  improvement_suggestions?: ImprovementSuggestion[];
+  potential_increase?: Record<string, PotentialIncrease>;
+  data_source?: { income: string; expense: string };
 };
 
 export type OcrResponse = {
