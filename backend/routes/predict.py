@@ -115,6 +115,23 @@ def predict():
         result["positive_factors"] = decision_result.get('positive_factors', [])
         result["risk_factors"] = decision_result.get('risk_factors', [])
 
+        # Loan eligibility data
+        loan_eligibility = decision_result.get('loan_eligibility', {})
+        result["loan_eligibility"] = {
+            'eligible_loan_amount': loan_eligibility.get('eligible_loan_amount', 0),
+            'monthly_emi_estimate': loan_eligibility.get('monthly_emi_estimate', 0),
+            'effective_income': loan_eligibility.get('effective_income', 0),
+            'effective_expense': loan_eligibility.get('effective_expense', 0),
+            'disposable_income': loan_eligibility.get('disposable_income', 0),
+            'savings_ratio': loan_eligibility.get('savings_ratio', 0),
+            'max_dti_ratio': loan_eligibility.get('max_dti_ratio', 0),
+            'income_used': loan_eligibility.get('income_used', 'declared'),
+            'expense_used': loan_eligibility.get('expense_used', 'declared'),
+        }
+        result["improvement_suggestions"] = loan_eligibility.get('improvement_suggestions', [])
+        result["potential_increase"] = loan_eligibility.get('potential_increase', {})
+        result["data_source"] = decision_result.get('data_source', {})
+
         return jsonify(result), 200
 
     except ValidationError as err:
